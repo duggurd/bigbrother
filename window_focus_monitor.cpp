@@ -2,9 +2,19 @@
 #include <iostream>
 #include <string>
 #include <psapi.h>
+#include <fstream>
+#include <vector>
+#include <chrono>
+#include <shlobj.h>
 
-// Global variable to store the hook handle
+// Global variables
 HWINEVENTHOOK g_hWinEventHook = NULL;
+std::string g_dataFilePath;
+std::ofstream g_logFile;
+long long g_sessionStart = 0;
+bool g_sessionActive = false;
+bool g_shouldExit = false;
+bool g_shutdownInProgress = false;
 
 // Function to get window title from window handle
 std::string GetWindowTitle(HWND hwnd) {
@@ -50,6 +60,188 @@ std::string GetProcessInfo(HWND hwnd) {
     return "Unknown Process (PID: " + std::to_string(processId) + ")";
 }
 
+// Function to get current Unix timestamp
+long long GetUnixTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto duration = now.time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+}
+
+// Function to get user data directory path
+std::string GetUserDataPath() {
+    char path[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, path))) {
+        std::string userDataPath = std::string(path) + "\\BigBrother";
+        CreateDirectoryA(userDataPath.c_str(), NULL); // Create directory if it doesn't exist
+        return userDataPath + "\\focus_log.json";
+    }
+    return "focus_log.json"; // Fallback to current directory
+}
+
+// Function to escape JSON strings
+std::string EscapeJsonString(const std::string& str) {
+    std::string escaped;
+    for (char c : str) {
+        switch (c) {
+            case '"': escaped += "\\\""; break;
+            case '\\': escaped += "\\\\"; break;
+            case '\b': escaped += "\\b"; break;
+            case '\f': escaped += "\\f"; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped += c; break;
+        }
+    }
+    return escaped;
+}
+
+// Function to start a new session
+void StartSession() {
+    g_sessionStart = GetUnixTimestamp();
+    g_sessionActive = true;
+    
+    g_dataFilePath = GetUserDataPath();
+    
+    // Read existing data
+    std::ifstream inFile(g_dataFilePath);
+    std::string existingData;
+    if (inFile.is_open()) {
+        std::string line;
+        while (std::getline(inFile, line)) {
+            existingData += line + "\n";
+        }
+        inFile.close();
+    }
+    
+    // Open file for writing
+    g_logFile.open(g_dataFilePath, std::ios::out | std::ios::trunc);
+    
+    if (existingData.empty()) {
+        // New file - start with sessions array
+        g_logFile << "{ \"sessions\": [\n";
+        g_logFile << "{\"start_timestamp\": " << g_sessionStart 
+                 << ", \"end_timestamp\": null, \"window_focus\": [";
+    } else {
+        // Existing file - find the last session and close it, then add new session
+        size_t lastBracket = existingData.rfind(']');
+        if (lastBracket != std::string::npos) {
+            // Remove the closing brackets and add new session
+            existingData = existingData.substr(0, lastBracket);
+            g_logFile << existingData;
+            if (existingData.find("window_focus") != std::string::npos) {
+                g_logFile << "],\n"; // Close previous session
+            }
+            g_logFile << "{\"start_timestamp\": " << g_sessionStart 
+                     << ", \"end_timestamp\": null, \"window_focus\": [";
+        } else {
+            // Corrupted file, start fresh
+            g_logFile << "{ \"sessions\": [\n";
+            g_logFile << "{\"start_timestamp\": " << g_sessionStart 
+                     << ", \"end_timestamp\": null, \"window_focus\": [";
+        }
+    }
+    
+    g_logFile.flush();
+    std::cout << "Session started. Data will be saved to: " << g_dataFilePath << std::endl;
+}
+
+// Function to log window focus change
+void LogFocusChange(const std::string& windowTitle, const std::string& processName, const std::string& processPath) {
+    if (!g_sessionActive) return;
+    
+    long long timestamp = GetUnixTimestamp();
+    
+    // Check if this is the first focus event in the session
+    static bool firstEvent = true;
+    if (!firstEvent) {
+        g_logFile << ",\n";
+    }
+    firstEvent = false;
+    
+    g_logFile << "{\"focus_timestamp\": " << timestamp
+             << ", \"focus_window_title\": \"" << EscapeJsonString(windowTitle) << "\""
+             << ", \"focus_process_name\": \"" << EscapeJsonString(processName) << "\""
+             << ", \"focus_process_path\": \"" << EscapeJsonString(processPath) << "\"}";
+    
+    g_logFile.flush();
+}
+
+// Function to end session
+void EndSession() {
+    if (!g_sessionActive) return;
+    
+    long long sessionEnd = GetUnixTimestamp();
+    g_sessionActive = false;
+    
+    if (g_logFile.is_open()) {
+        // Close the current session
+        g_logFile << "]}";
+        g_logFile.close();
+        
+        // Read the file back and update the end timestamp
+        std::ifstream inFile(g_dataFilePath);
+        std::string content;
+        if (inFile.is_open()) {
+            std::string line;
+            while (std::getline(inFile, line)) {
+                content += line + "\n";
+            }
+            inFile.close();
+        }
+        
+        // Replace "end_timestamp": null with actual timestamp
+        size_t pos = content.find("\"end_timestamp\": null");
+        if (pos != std::string::npos) {
+            content.replace(pos, 22, "\"end_timestamp\": " + std::to_string(sessionEnd));
+        }
+        
+        // Add closing brackets if needed
+        if (content.back() != '\n') content += "\n";
+        content += "]}\n";
+        
+        // Write back to file
+        std::ofstream outFile(g_dataFilePath);
+        if (outFile.is_open()) {
+            outFile << content;
+            outFile.close();
+        }
+    }
+    
+    std::cout << "Session ended and data saved to: " << g_dataFilePath << std::endl;
+}
+
+// Console control handler for Ctrl+C
+BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
+    switch (dwCtrlType) {
+        case CTRL_C_EVENT:
+        case CTRL_CLOSE_EVENT:
+        case CTRL_BREAK_EVENT:
+        case CTRL_LOGOFF_EVENT:
+        case CTRL_SHUTDOWN_EVENT:
+            // Prevent multiple shutdown calls
+            if (g_shutdownInProgress) {
+                return TRUE;
+            }
+            g_shutdownInProgress = true;
+            
+            std::cout << "\nShutting down gracefully..." << std::endl;
+            g_shouldExit = true;
+            EndSession();
+            if (g_hWinEventHook) {
+                UnhookWinEvent(g_hWinEventHook);
+                g_hWinEventHook = NULL;
+            }
+            
+            std::cout << "Program exited successfully." << std::endl;
+            
+            // Force exit the process
+            ExitProcess(0);
+        default:
+            return FALSE;
+    }
+}
+
 // Callback function for window events
 void CALLBACK WinEventProc(
     HWINEVENTHOOK hWinEventHook,
@@ -65,6 +257,24 @@ void CALLBACK WinEventProc(
         std::string windowTitle = GetWindowTitle(hwnd);
         std::string processInfo = GetProcessInfo(hwnd);
         
+        // Extract process name and path from processInfo
+        std::string processName, processPath;
+        size_t parenPos = processInfo.find(" (");
+        if (parenPos != std::string::npos) {
+            processName = processInfo.substr(0, parenPos);
+            size_t pathStart = parenPos + 2;
+            size_t pathEnd = processInfo.find(")", pathStart);
+            if (pathEnd != std::string::npos) {
+                processPath = processInfo.substr(pathStart, pathEnd - pathStart);
+            }
+        } else {
+            processName = processInfo;
+            processPath = "Unknown";
+        }
+        
+        // Log to JSON file
+        LogFocusChange(windowTitle, processName, processPath);
+        
         std::cout << "Focus changed to: " << windowTitle << std::endl;
         std::cout << "  Process: " << processInfo << std::endl;
         std::cout << "  ---" << std::endl;
@@ -72,8 +282,14 @@ void CALLBACK WinEventProc(
 }
 
 int main() {
-    std::cout << "Window Focus Monitor Started" << std::endl;
+    std::cout << "BigBrother Window Focus Monitor Started" << std::endl;
     std::cout << "Press Ctrl+C to exit..." << std::endl;
+    
+    // Set up console control handler for graceful shutdown
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+    
+    // Start session
+    StartSession();
     
     // Set up the hook to monitor foreground window changes
     g_hWinEventHook = SetWinEventHook(
@@ -95,14 +311,20 @@ int main() {
     
     // Message loop to keep the program running
     MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
+    while (!g_shouldExit && GetMessage(&msg, NULL, 0, 0) > 0) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
     
-    // Clean up
-    if (g_hWinEventHook) {
-        UnhookWinEvent(g_hWinEventHook);
+    // Clean up (fallback cleanup if not already done by Ctrl+C handler)
+    if (!g_shutdownInProgress) {
+        if (g_sessionActive) {
+            EndSession();
+        }
+        if (g_hWinEventHook) {
+            UnhookWinEvent(g_hWinEventHook);
+        }
+        std::cout << "Program exited successfully." << std::endl;
     }
     
     return 0;
