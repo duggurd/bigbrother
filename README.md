@@ -1,6 +1,6 @@
-# Window Focus Monitor
+# BigBrother Window Focus & Title Monitor
 
-A simple C++ program that monitors Windows window focus changes and prints the title of the focused window to the console.
+A C++ program that monitors Windows window focus changes and title changes, tracking tab switches in browsers, terminal apps, and other applications that update their window titles.
 
 ## Requirements
 - Windows operating system
@@ -29,7 +29,7 @@ cl /EHsc window_focus_monitor.cpp user32.lib psapi.lib shell32.lib
 window_focus_monitor.exe
 ```
 
-The program will start monitoring window focus changes. Switch between different windows to see their titles and process information printed to the console. All data is automatically saved to a JSON file in your Windows AppData folder. Press Ctrl+C to exit gracefully.
+The program will start monitoring window focus and title changes. Switch between different windows or tabs (in browsers, terminal apps, etc.) to see changes printed to the console. All data is automatically saved to a JSON file in your Windows AppData folder. Press Ctrl+C to exit gracefully.
 
 ## Data Storage
 The program automatically saves all session data to:
@@ -42,18 +42,34 @@ The program automatically saves all session data to:
     {
       "start_timestamp": 1695910245,
       "end_timestamp": 1695912000,
-      "window_focus": [
+      "window_events": [
         {
-          "focus_timestamp": 1695910250,
-          "focus_window_title": "Visual Studio Code",
-          "focus_process_name": "Code.exe",
-          "focus_process_path": "C:\\Users\\username\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"
+          "event_type": "focus_change",
+          "timestamp": 1695910250,
+          "window_title": "Visual Studio Code",
+          "process_name": "Code.exe",
+          "process_path": "C:\\Users\\username\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"
         },
         {
-          "focus_timestamp": 1695910300,
-          "focus_window_title": "Google Chrome",
-          "focus_process_name": "chrome.exe", 
-          "focus_process_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+          "event_type": "title_change",
+          "timestamp": 1695910275,
+          "window_title": "main.cpp - Visual Studio Code",
+          "process_name": "Code.exe",
+          "process_path": "C:\\Users\\username\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"
+        },
+        {
+          "event_type": "focus_change",
+          "timestamp": 1695910300,
+          "window_title": "Google Chrome",
+          "process_name": "chrome.exe", 
+          "process_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+        },
+        {
+          "event_type": "title_change",
+          "timestamp": 1695910310,
+          "window_title": "GitHub - Google Chrome",
+          "process_name": "chrome.exe",
+          "process_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
         }
       ]
     }
@@ -63,25 +79,41 @@ The program automatically saves all session data to:
 
 ## Console Output
 ```
-BigBrother Window Focus Monitor Started
+BigBrother Window Focus & Title Monitor Started
 Press Ctrl+C to exit...
 Session started. Data will be saved to: C:\Users\username\AppData\Roaming\BigBrother\focus_log.json
-Hook installed successfully. Monitoring window focus changes...
+Hooks installed successfully. Monitoring window focus and title changes...
 Focus changed to: Visual Studio Code
+  Process: Code.exe (C:\Users\username\AppData\Local\Programs\Microsoft VS Code\Code.exe)
+  ---
+Title changed to: main.cpp - Visual Studio Code
   Process: Code.exe (C:\Users\username\AppData\Local\Programs\Microsoft VS Code\Code.exe)
   ---
 Focus changed to: Google Chrome
   Process: chrome.exe (C:\Program Files\Google\Chrome\Application\chrome.exe)
   ---
+Title changed to: GitHub - Google Chrome
+  Process: chrome.exe (C:\Program Files\Google\Chrome\Application\chrome.exe)
+  ---
 ```
 
 ## How it works
-- Uses Windows API `SetWinEventHook()` to register a callback for `EVENT_SYSTEM_FOREGROUND` events
-- When focus changes, the callback retrieves:
+- Uses Windows API `SetWinEventHook()` to register callbacks for:
+  - `EVENT_SYSTEM_FOREGROUND` events (window focus changes)
+  - `EVENT_OBJECT_NAMECHANGE` events (window title changes)
+- When events occur, the callback retrieves:
   - Window title using `GetWindowText()`
   - Process ID using `GetWindowThreadProcessId()`
   - Process name and path using `OpenProcess()` and `GetModuleFileNameEx()`
+- Only tracks title changes for the currently focused window to avoid spam
 - All data is saved in real-time to a JSON file with Unix timestamps
 - Sessions are tracked from program start to Ctrl+C exit
 - Graceful shutdown ensures session end timestamps are recorded
 - Runs a message loop to keep the program active and process events
+
+## Use Cases
+- Track productivity and time spent in different applications
+- Monitor tab switches in web browsers (Chrome, Firefox, Edge)
+- Track terminal tab/session changes (Windows Terminal, ConEmu, etc.)
+- Monitor document switches in text editors (VS Code, Notepad++, etc.)
+- Analyze workflow patterns and application usage

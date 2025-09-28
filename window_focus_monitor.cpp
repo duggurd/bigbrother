@@ -8,13 +8,16 @@
 #include <shlobj.h>
 
 // Global variables
-HWINEVENTHOOK g_hWinEventHook = NULL;
+HWINEVENTHOOK g_hFocusHook = NULL;
+HWINEVENTHOOK g_hTitleHook = NULL;
 std::string g_dataFilePath;
 std::ofstream g_logFile;
 long long g_sessionStart = 0;
 bool g_sessionActive = false;
 bool g_shouldExit = false;
 bool g_shutdownInProgress = false;
+std::string g_lastFocusedWindowTitle = "";
+HWND g_lastFocusedWindow = NULL;
 
 // Function to get window title from window handle
 std::string GetWindowTitle(HWND hwnd) {
@@ -129,7 +132,7 @@ void StartSession() {
             // Remove the closing brackets and add new session
             existingData = existingData.substr(0, lastBracket);
             g_logFile << existingData;
-            if (existingData.find("window_focus") != std::string::npos) {
+            if (existingData.find("window_events") != std::string::npos || existingData.find("window_focus") != std::string::npos) {
                 g_logFile << "],\n"; // Close previous session
             }
             g_logFile << "{\"start_timestamp\": " << g_sessionStart 
@@ -146,23 +149,24 @@ void StartSession() {
     std::cout << "Session started. Data will be saved to: " << g_dataFilePath << std::endl;
 }
 
-// Function to log window focus change
-void LogFocusChange(const std::string& windowTitle, const std::string& processName, const std::string& processPath) {
+// Function to log window event (focus change or title change)
+void LogWindowEvent(const std::string& eventType, const std::string& windowTitle, const std::string& processName, const std::string& processPath) {
     if (!g_sessionActive) return;
     
     long long timestamp = GetUnixTimestamp();
     
-    // Check if this is the first focus event in the session
+    // Check if this is the first event in the session
     static bool firstEvent = true;
     if (!firstEvent) {
         g_logFile << ",\n";
     }
     firstEvent = false;
     
-    g_logFile << "{\"focus_timestamp\": " << timestamp
-             << ", \"focus_window_title\": \"" << EscapeJsonString(windowTitle) << "\""
-             << ", \"focus_process_name\": \"" << EscapeJsonString(processName) << "\""
-             << ", \"focus_process_path\": \"" << EscapeJsonString(processPath) << "\"}";
+    g_logFile << "{\"event_type\": \"" << eventType << "\""
+             << ", \"timestamp\": " << timestamp
+             << ", \"window_title\": \"" << EscapeJsonString(windowTitle) << "\""
+             << ", \"process_name\": \"" << EscapeJsonString(processName) << "\""
+             << ", \"process_path\": \"" << EscapeJsonString(processPath) << "\"}";
     
     g_logFile.flush();
 }
@@ -228,9 +232,13 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
             std::cout << "\nShutting down gracefully..." << std::endl;
             g_shouldExit = true;
             EndSession();
-            if (g_hWinEventHook) {
-                UnhookWinEvent(g_hWinEventHook);
-                g_hWinEventHook = NULL;
+            if (g_hFocusHook) {
+                UnhookWinEvent(g_hFocusHook);
+                g_hFocusHook = NULL;
+            }
+            if (g_hTitleHook) {
+                UnhookWinEvent(g_hTitleHook);
+                g_hTitleHook = NULL;
             }
             
             std::cout << "Program exited successfully." << std::endl;
@@ -252,37 +260,56 @@ void CALLBACK WinEventProc(
     DWORD dwEventThread,
     DWORD dwmsEventTime
 ) {
-    // Check if this is a focus change event and it's for a window (not a child object)
-    if (event == EVENT_SYSTEM_FOREGROUND && idObject == OBJID_WINDOW && hwnd != NULL) {
-        std::string windowTitle = GetWindowTitle(hwnd);
-        std::string processInfo = GetProcessInfo(hwnd);
-        
-        // Extract process name and path from processInfo
-        std::string processName, processPath;
-        size_t parenPos = processInfo.find(" (");
-        if (parenPos != std::string::npos) {
-            processName = processInfo.substr(0, parenPos);
-            size_t pathStart = parenPos + 2;
-            size_t pathEnd = processInfo.find(")", pathStart);
-            if (pathEnd != std::string::npos) {
-                processPath = processInfo.substr(pathStart, pathEnd - pathStart);
-            }
-        } else {
-            processName = processInfo;
-            processPath = "Unknown";
+    if (hwnd == NULL) return;
+    
+    std::string windowTitle = GetWindowTitle(hwnd);
+    std::string processInfo = GetProcessInfo(hwnd);
+    
+    // Extract process name and path from processInfo
+    std::string processName, processPath;
+    size_t parenPos = processInfo.find(" (");
+    if (parenPos != std::string::npos) {
+        processName = processInfo.substr(0, parenPos);
+        size_t pathStart = parenPos + 2;
+        size_t pathEnd = processInfo.find(")", pathStart);
+        if (pathEnd != std::string::npos) {
+            processPath = processInfo.substr(pathStart, pathEnd - pathStart);
         }
+    } else {
+        processName = processInfo;
+        processPath = "Unknown";
+    }
+    
+    // Handle focus change events
+    if (event == EVENT_SYSTEM_FOREGROUND && idObject == OBJID_WINDOW) {
+        g_lastFocusedWindow = hwnd;
+        g_lastFocusedWindowTitle = windowTitle;
         
         // Log to JSON file
-        LogFocusChange(windowTitle, processName, processPath);
+        LogWindowEvent("focus_change", windowTitle, processName, processPath);
         
         std::cout << "Focus changed to: " << windowTitle << std::endl;
         std::cout << "  Process: " << processInfo << std::endl;
         std::cout << "  ---" << std::endl;
     }
+    // Handle title change events
+    else if (event == EVENT_OBJECT_NAMECHANGE && idObject == OBJID_WINDOW) {
+        // Only log title changes for the currently focused window or if it's a significant change
+        if (hwnd == g_lastFocusedWindow && windowTitle != g_lastFocusedWindowTitle && !windowTitle.empty()) {
+            g_lastFocusedWindowTitle = windowTitle;
+            
+            // Log to JSON file
+            LogWindowEvent("title_change", windowTitle, processName, processPath);
+            
+            std::cout << "Title changed to: " << windowTitle << std::endl;
+            std::cout << "  Process: " << processInfo << std::endl;
+            std::cout << "  ---" << std::endl;
+        }
+    }
 }
 
 int main() {
-    std::cout << "BigBrother Window Focus Monitor Started" << std::endl;
+    std::cout << "BigBrother Window Focus & Title Monitor Started" << std::endl;
     std::cout << "Press Ctrl+C to exit..." << std::endl;
     
     // Set up console control handler for graceful shutdown
@@ -292,7 +319,7 @@ int main() {
     StartSession();
     
     // Set up the hook to monitor foreground window changes
-    g_hWinEventHook = SetWinEventHook(
+    g_hFocusHook = SetWinEventHook(
         EVENT_SYSTEM_FOREGROUND,    // eventMin - we only want foreground changes
         EVENT_SYSTEM_FOREGROUND,    // eventMax - same as eventMin for single event
         NULL,                       // hmodWinEventProc - NULL for out-of-context hook
@@ -302,12 +329,23 @@ int main() {
         WINEVENT_OUTOFCONTEXT      // dwFlags - out-of-context hook
     );
     
-    if (g_hWinEventHook == NULL) {
-        std::cerr << "Failed to set up window event hook!" << std::endl;
+    // Set up the hook to monitor window title changes
+    g_hTitleHook = SetWinEventHook(
+        EVENT_OBJECT_NAMECHANGE,    // eventMin - window title changes
+        EVENT_OBJECT_NAMECHANGE,    // eventMax - same as eventMin for single event
+        NULL,                       // hmodWinEventProc - NULL for out-of-context hook
+        WinEventProc,              // lpfnWinEventProc - our callback function
+        0,                         // idProcess - 0 for all processes
+        0,                         // idThread - 0 for all threads
+        WINEVENT_OUTOFCONTEXT      // dwFlags - out-of-context hook
+    );
+    
+    if (g_hFocusHook == NULL || g_hTitleHook == NULL) {
+        std::cerr << "Failed to set up window event hooks!" << std::endl;
         return 1;
     }
     
-    std::cout << "Hook installed successfully. Monitoring window focus changes..." << std::endl;
+    std::cout << "Hooks installed successfully. Monitoring window focus and title changes..." << std::endl;
     
     // Message loop to keep the program running
     MSG msg;
@@ -321,8 +359,11 @@ int main() {
         if (g_sessionActive) {
             EndSession();
         }
-        if (g_hWinEventHook) {
-            UnhookWinEvent(g_hWinEventHook);
+        if (g_hFocusHook) {
+            UnhookWinEvent(g_hFocusHook);
+        }
+        if (g_hTitleHook) {
+            UnhookWinEvent(g_hTitleHook);
         }
         std::cout << "Program exited successfully." << std::endl;
     }
