@@ -82,6 +82,67 @@ std::string GetUserDataPath() {
     return "focus_log.json";
 }
 
+// Helper function to get settings file path
+std::string GetSettingsFilePath() {
+    char path[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, path))) {
+        return std::string(path) + "\\BigBrother\\viewer_settings.json";
+    }
+    return "viewer_settings.json";
+}
+
+// Save program filters to settings file
+void SaveProgramFilters() {
+    json settings;
+    settings["program_filters"] = json::array();
+    
+    for (const auto& filter : g_programFilters) {
+        json filterJson;
+        filterJson["program_name"] = filter.program_name;
+        filterJson["enabled"] = filter.enabled;
+        settings["program_filters"].push_back(filterJson);
+    }
+    
+    std::string settingsPath = GetSettingsFilePath();
+    std::ofstream outFile(settingsPath);
+    if (outFile.is_open()) {
+        outFile << settings.dump(2) << std::endl;
+        outFile.close();
+    }
+}
+
+// Load program filters from settings file
+void LoadProgramFilters() {
+    std::string settingsPath = GetSettingsFilePath();
+    std::ifstream inFile(settingsPath);
+    
+    if (!inFile.is_open()) {
+        return; // No settings file yet, use defaults
+    }
+    
+    try {
+        json settings;
+        inFile >> settings;
+        inFile.close();
+        
+        if (settings.contains("program_filters") && settings["program_filters"].is_array()) {
+            g_programFilters.clear();
+            
+            for (const auto& filterJson : settings["program_filters"]) {
+                ProgramFilter filter;
+                filter.program_name = filterJson.value("program_name", "");
+                filter.enabled = filterJson.value("enabled", true);
+                
+                if (!filter.program_name.empty()) {
+                    g_programFilters.push_back(filter);
+                }
+            }
+        }
+    } catch (const json::exception& e) {
+        // Error parsing settings, use defaults
+    }
+}
+
 // Helper function to convert HICON to DirectX 11 texture
 ID3D11ShaderResourceView* CreateTextureFromIcon(HICON hIcon) {
     if (!hIcon) return nullptr;
@@ -355,6 +416,9 @@ int main(int, char**)
     // Get data file path
     g_dataFilePath = GetUserDataPath();
     LoadSessions();
+    
+    // Load program filter settings
+    LoadProgramFilters();
     
     // Create application window
     WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"BigBrother Viewer", nullptr };
@@ -686,6 +750,9 @@ int main(int, char**)
                         
                         // Clear input field
                         g_newProgramName[0] = '\0';
+                        
+                        // Save settings
+                        SaveProgramFilters();
                     }
                 }
             }
@@ -706,7 +773,11 @@ int main(int, char**)
                 ImGui::PushID(i);
                 
                 // Checkbox to enable/disable filter
+                bool wasEnabled = g_programFilters[i].enabled;
                 ImGui::Checkbox("##enabled", &g_programFilters[i].enabled);
+                if (wasEnabled != g_programFilters[i].enabled) {
+                    SaveProgramFilters(); // Save when checkbox changes
+                }
                 ImGui::SameLine();
                 
                 // Program name
@@ -730,6 +801,7 @@ int main(int, char**)
             if (deleteIndex >= 0 && deleteIndex < g_programFilters.size())
             {
                 g_programFilters.erase(g_programFilters.begin() + deleteIndex);
+                SaveProgramFilters(); // Save after deletion
             }
             
             if (g_programFilters.empty())
