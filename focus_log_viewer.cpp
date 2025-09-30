@@ -485,10 +485,19 @@ int main(int, char**)
                                 
                                 ImGui::Text("Time per Title:");
                                 ImGui::Indent();
+                                
+                                // Use a monospace font for the duration column (if available)
                                 for (const auto& pair : sortedTitles)
                                 {
-                                    std::string display = FormatDuration(pair.second) + " - " + pair.first;
-                                    ImGui::BulletText("%s", display.c_str());
+                                    // Format duration with fixed width for alignment
+                                    std::string duration = FormatDuration(pair.second);
+                                    // Pad duration to 5 characters for alignment
+                                    while (duration.length() < 5) {
+                                        duration = " " + duration;
+                                    }
+                                    
+                                    std::string display = duration + " | " + pair.first;
+                                    ImGui::Text("%s", display.c_str());
                                 }
                                 ImGui::Unindent();
                             }
