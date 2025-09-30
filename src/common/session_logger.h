@@ -284,7 +284,7 @@ public:
     }
 };
 
-// Static member initialization
-SessionLogger* SessionLogger::s_instance = nullptr;
+// Static member initialization (inline to avoid multiple definition errors)
+inline SessionLogger* SessionLogger::s_instance = nullptr;
 
 } // namespace bigbrother

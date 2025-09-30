@@ -40,10 +40,6 @@ imgui.ini
 .DS_Store
 Thumbs.db
 
-# Old build files (legacy)
-window_focus_monitor.exe
-focus_log_viewer.exe
-*.obj
-session_logger.h.old
-window_focus_monitor.cpp.old
-focus_log_viewer.cpp.old
+# Old build files (legacy) - all moved to new structure
+*.old
+*.bak

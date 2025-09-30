@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include "session_data.h"
+#include "json.hpp"
 
 namespace bigbrother {
 namespace viewer {

@@ -1,13 +1,13 @@
 # BigBrother Viewer - ImGui GUI application
 
 # Find ImGui (must be set up first)
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/third_party/imgui/imgui.cpp")
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/imgui/imgui.cpp")
     message(WARNING "ImGui not found. Run setup_imgui.bat first.")
     return()
 endif()
 
 # ImGui sources
-set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/third_party/imgui)
+set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/imgui)
 set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_demo.cpp
@@ -34,6 +34,7 @@ target_include_directories(bigbrother_viewer PRIVATE
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/third_party
 )
 
 target_link_libraries(bigbrother_viewer PRIVATE
