@@ -12,6 +12,7 @@
 #include <shlobj.h>
 #include <shellapi.h>
 #include <map>
+#include <algorithm>
 #include "json.hpp"
 
 using json = nlohmann::json;
@@ -450,12 +451,44 @@ int main(int, char**)
                             if (!event.title_changes.empty())
                             {
                                 ImGui::Spacing();
-                                ImGui::Text("Title Changes:");
-                                ImGui::Indent();
-                                for (const auto& tc : event.title_changes)
+                                
+                                // Calculate time spent on each unique title
+                                std::map<std::string, long long> titleDurations;
+                                
+                                for (size_t i = 0; i < event.title_changes.size(); i++)
                                 {
-                                    std::string tc_str = FormatTime(tc.timestamp) + " - " + tc.title;
-                                    ImGui::BulletText("%s", tc_str.c_str());
+                                    const auto& tc = event.title_changes[i];
+                                    long long duration = 0;
+                                    
+                                    // Calculate duration until next title change or end of focus event
+                                    if (i < event.title_changes.size() - 1) {
+                                        duration = event.title_changes[i + 1].timestamp - tc.timestamp;
+                                    } else {
+                                        // Last title change - duration until next focus event or session end
+                                        if (eventIdx < session.window_focus.size() - 1) {
+                                            duration = session.window_focus[eventIdx + 1].focus_timestamp - tc.timestamp;
+                                        } else {
+                                            duration = session.end_timestamp - tc.timestamp;
+                                        }
+                                    }
+                                    
+                                    // Aggregate durations for same title
+                                    titleDurations[tc.title] += duration;
+                                }
+                                
+                                // Convert to vector for sorting
+                                std::vector<std::pair<std::string, long long>> sortedTitles(titleDurations.begin(), titleDurations.end());
+                                
+                                // Sort by duration (longest first)
+                                std::sort(sortedTitles.begin(), sortedTitles.end(), 
+                                    [](const auto& a, const auto& b) { return a.second > b.second; });
+                                
+                                ImGui::Text("Time per Title:");
+                                ImGui::Indent();
+                                for (const auto& pair : sortedTitles)
+                                {
+                                    std::string display = FormatDuration(pair.second) + " - " + pair.first;
+                                    ImGui::BulletText("%s", display.c_str());
                                 }
                                 ImGui::Unindent();
                             }
