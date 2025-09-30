@@ -61,6 +61,10 @@ std::map<std::string, ID3D11ShaderResourceView*> g_iconCache;
 // Session logger instance
 SessionLogger g_sessionLogger;
 
+// UI Settings
+bool g_showSettingsWindow = false;
+bool g_filterExplorerExe = false;
+
 // Helper function to get user data path
 std::string GetUserDataPath() {
     char path[MAX_PATH];
@@ -441,6 +445,15 @@ int main(int, char**)
                 }
             }
             
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            if (ImGui::Button("Settings"))
+            {
+                g_showSettingsWindow = !g_showSettingsWindow;
+            }
+            
             ImGui::EndMenuBar();
         }
 
@@ -497,6 +510,11 @@ int main(int, char**)
                     for (int eventIdx = 0; eventIdx < session.window_focus.size(); eventIdx++)
                     {
                         const auto& event = session.window_focus[eventIdx];
+                        
+                        // Apply explorer.exe filter if enabled
+                        if (g_filterExplorerExe && event.process_name == "explorer.exe") {
+                            continue; // Skip this event
+                        }
                         
                         ImGui::PushID(eventIdx);
                         
@@ -611,6 +629,36 @@ int main(int, char**)
         ImGui::Text("Total Sessions: %d", (int)g_sessions.size());
 
         ImGui::End();
+
+        // Settings Window
+        if (g_showSettingsWindow)
+        {
+            ImGui::SetNextWindowSize(ImVec2(400, 200), ImGuiCond_FirstUseEver);
+            ImGui::Begin("Settings", &g_showSettingsWindow);
+            
+            ImGui::Text("Display Filters");
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            if (ImGui::Checkbox("Filter out explorer.exe events", &g_filterExplorerExe))
+            {
+                // Filter state changed, no action needed (applied on next frame)
+            }
+            
+            ImGui::Spacing();
+            ImGui::TextWrapped("When enabled, all window focus events from Windows Explorer will be hidden from the timeline view.");
+            
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            if (ImGui::Button("Close"))
+            {
+                g_showSettingsWindow = false;
+            }
+            
+            ImGui::End();
+        }
 
         // Rendering
         ImGui::Render();
