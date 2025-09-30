@@ -48,7 +48,7 @@ target_link_libraries(bigbrother_viewer PRIVATE
 
 # Set output name
 set_target_properties(bigbrother_viewer PROPERTIES
-    OUTPUT_NAME "bigbrother_viewer"
+    OUTPUT_NAME "bigbro"
 )
 
 # Windows subsystem
