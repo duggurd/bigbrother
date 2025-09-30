@@ -52,7 +52,6 @@ struct Session {
 
 std::vector<Session> g_sessions;
 std::string g_dataFilePath;
-int g_selectedSession = -1;
 
 // Icon cache: maps process path to DirectX texture
 std::map<std::string, ID3D11ShaderResourceView*> g_iconCache;
@@ -249,7 +248,6 @@ std::string FormatDuration(long long seconds) {
 // Load sessions from JSON file
 void LoadSessions() {
     g_sessions.clear();
-    g_selectedSession = -1;
     
     std::ifstream inFile(g_dataFilePath);
     if (!inFile.is_open()) {
@@ -385,160 +383,110 @@ int main(int, char**)
             ImGui::EndMenuBar();
         }
 
-        // Sessions List
-        ImGui::Text("Sessions");
+        // Unified Timeline View
+        ImGui::Text("Session Timeline");
         ImGui::Separator();
         
-        if (ImGui::BeginChild("SessionsList", ImVec2(0, 250), true))
+        if (ImGui::BeginChild("UnifiedTimeline", ImVec2(0, -30), true))
         {
-            for (int i = 0; i < g_sessions.size(); i++)
+            for (int sessionIdx = 0; sessionIdx < g_sessions.size(); sessionIdx++)
             {
-                const auto& session = g_sessions[i];
+                const auto& session = g_sessions[sessionIdx];
                 
-                ImGui::PushID(i);
+                ImGui::PushID(sessionIdx);
                 
-                // Calculate duration
-                long long duration = session.end_timestamp - session.start_timestamp;
+                // Calculate session duration
+                long long session_duration = session.end_timestamp - session.start_timestamp;
                 
-                // Session header with timestamps
+                // Session header with timestamps and duration
                 std::string start_time = FormatTime(session.start_timestamp);
                 std::string end_time = FormatTime(session.end_timestamp);
-                std::string header = "Session " + std::to_string(i + 1) + 
-                                    "  (" + start_time + " - " + end_time + ")";
-                bool is_selected = (g_selectedSession == i);
+                std::string session_header = "Session " + std::to_string(sessionIdx + 1) + 
+                                    "  (" + start_time + " - " + end_time + ", " + 
+                                    FormatDuration(session_duration) + ")";
                 
-                if (ImGui::Selectable(header.c_str(), is_selected, 0, ImVec2(0, 0)))
-                {
-                    g_selectedSession = i;
-                }
+                // Session tree node with distinct color
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 1.0f, 0.6f, 1.0f)); // Light green
+                bool session_open = ImGui::TreeNodeEx(session_header.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+                ImGui::PopStyleColor();
                 
-                if (is_selected)
+                if (session_open)
                 {
-                    ImGui::Indent();
-                    ImGui::Text("Start:    %s", FormatTimestamp(session.start_timestamp).c_str());
-                    ImGui::Text("End:      %s", FormatTimestamp(session.end_timestamp).c_str());
-                    ImGui::Text("Duration: %s", FormatDuration(duration).c_str());
-                    ImGui::Text("Window Changes: %d", (int)session.window_focus.size());
-                    ImGui::Unindent();
+                    // Display focus events for this session
+                    for (int eventIdx = 0; eventIdx < session.window_focus.size(); eventIdx++)
+                    {
+                        const auto& event = session.window_focus[eventIdx];
+                        
+                        ImGui::PushID(eventIdx);
+                        
+                        // Calculate event duration
+                        long long event_duration = 0;
+                        if (eventIdx < session.window_focus.size() - 1) {
+                            event_duration = session.window_focus[eventIdx + 1].focus_timestamp - event.focus_timestamp;
+                        } else {
+                            event_duration = session.end_timestamp - event.focus_timestamp;
+                        }
+                        
+                        // Event header with icon
+                        std::string time_str = FormatTime(event.focus_timestamp);
+                        std::string event_header = time_str + " - " + event.process_name + " (" + FormatDuration(event_duration) + ")";
+                        
+                        // Get and display application icon
+                        ID3D11ShaderResourceView* icon = GetApplicationIcon(event.process_path);
+                        if (icon) {
+                            ImGui::Image((void*)icon, ImVec2(16, 16));
+                            ImGui::SameLine();
+                        }
+                        
+                        // Event tree node with yellow color
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.6f, 1.0f)); // Light yellow
+                        bool event_open = ImGui::TreeNode(event_header.c_str());
+                        ImGui::PopStyleColor();
+                        
+                        if (event_open)
+                        {
+                            ImGui::Text("Path: %s", event.process_path.c_str());
+                            
+                            if (!event.title_changes.empty())
+                            {
+                                ImGui::Spacing();
+                                ImGui::Text("Title Changes:");
+                                ImGui::Indent();
+                                for (const auto& tc : event.title_changes)
+                                {
+                                    std::string tc_str = FormatTime(tc.timestamp) + " - " + tc.title;
+                                    ImGui::BulletText("%s", tc_str.c_str());
+                                }
+                                ImGui::Unindent();
+                            }
+                            else
+                            {
+                                ImGui::Text("No title changes recorded");
+                            }
+                            
+                            ImGui::TreePop();
+                        }
+                        
+                        ImGui::PopID();
+                    }
+                    
+                    ImGui::TreePop();
                 }
                 
                 ImGui::PopID();
+                ImGui::Spacing();
+            }
+            
+            if (g_sessions.empty())
+            {
+                ImGui::TextDisabled("No sessions recorded yet. Run the monitor to start tracking.");
             }
         }
         ImGui::EndChild();
-
-        // Window Focus Events
-        ImGui::Spacing();
-        if (g_selectedSession >= 0 && g_selectedSession < g_sessions.size())
-        {
-            ImGui::Text("Window Focus Events (Session %d)", g_selectedSession + 1);
-            ImGui::Separator();
-            
-            const auto& session = g_sessions[g_selectedSession];
-            
-            if (ImGui::BeginChild("FocusEvents", ImVec2(0, 300), true))
-            {
-                for (int i = 0; i < session.window_focus.size(); i++)
-                {
-                    auto& event = g_sessions[g_selectedSession].window_focus[i];
-                    
-                    ImGui::PushID(i);
-                    
-                    // Calculate duration (time until next event or session end)
-                    long long duration = 0;
-                    if (i < session.window_focus.size() - 1) {
-                        duration = session.window_focus[i + 1].focus_timestamp - event.focus_timestamp;
-                    } else {
-                        duration = session.end_timestamp - event.focus_timestamp;
-                    }
-                    
-                    // Event header with icon and bold text
-                    std::string time_str = FormatTime(event.focus_timestamp);
-                    std::string header = time_str + " - " + event.process_name + " (" + FormatDuration(duration) + ")";
-                    
-                    // Get application icon
-                    ID3D11ShaderResourceView* icon = GetApplicationIcon(event.process_path);
-                    
-                    // Display icon if available
-                    if (icon) {
-                        ImGui::Image((void*)icon, ImVec2(16, 16));
-                        ImGui::SameLine();
-                    }
-                    
-                    // Make the header bold and more visible
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.6f, 1.0f)); // Light yellow color
-                    bool node_open = ImGui::TreeNode(header.c_str());
-                    ImGui::PopStyleColor();
-                    
-                    if (node_open)
-                    {
-                        ImGui::Text("Path:  %s", event.process_path.c_str());
-                        ImGui::Text("Duration: %s", FormatDuration(duration).c_str());
-                        
-                        if (!event.title_changes.empty())
-                        {
-                            ImGui::Spacing();
-                            ImGui::Text("Window Titles:");
-                            ImGui::Indent();
-                            for (const auto& tc : event.title_changes)
-                            {
-                                std::string tc_str = FormatTime(tc.timestamp) + " " + tc.title;
-                                ImGui::BulletText("%s", tc_str.c_str());
-                            }
-                            ImGui::Unindent();
-                        }
-                        else
-                        {
-                            ImGui::Text("Window Titles: None recorded");
-                        }
-                        
-                        ImGui::TreePop();
-                    }
-                    
-                    ImGui::PopID();
-                }
-            }
-            ImGui::EndChild();
-            
-            // Statistics
-            ImGui::Spacing();
-            ImGui::Separator();
-            
-            // Calculate statistics
-            long long total_duration = session.end_timestamp - session.start_timestamp;
-            std::string most_used = "N/A";
-            long long max_duration = 0;
-            
-            for (int i = 0; i < session.window_focus.size(); i++)
-            {
-                long long dur = 0;
-                if (i < session.window_focus.size() - 1) {
-                    dur = session.window_focus[i + 1].focus_timestamp - session.window_focus[i].focus_timestamp;
-                } else {
-                    dur = session.end_timestamp - session.window_focus[i].focus_timestamp;
-                }
-                
-                if (dur > max_duration) {
-                    max_duration = dur;
-                    most_used = session.window_focus[i].process_name;
-                }
-            }
-            
-            ImGui::Text("Session Statistics:");
-            ImGui::SameLine();
-            ImGui::Text("Total Time: %s", FormatDuration(total_duration).c_str());
-            ImGui::SameLine();
-            ImGui::Text(" | Most Used: %s (%s)", most_used.c_str(), FormatDuration(max_duration).c_str());
-        }
-        else
-        {
-            ImGui::Text("Select a session to view details");
-        }
         
-        // Overall statistics
-        ImGui::Spacing();
+        // Overall statistics bar at bottom
         ImGui::Separator();
-        ImGui::Text("Overall Statistics: Total Sessions: %d", (int)g_sessions.size());
+        ImGui::Text("Total Sessions: %d", (int)g_sessions.size());
 
         ImGui::End();
 
