@@ -6,18 +6,26 @@
 #include <vector>
 #include <chrono>
 #include <shlobj.h>
+#include "json.hpp"
+
+using json = nlohmann::json;
 
 // Global variables
 HWINEVENTHOOK g_hFocusHook = NULL;
 HWINEVENTHOOK g_hTitleHook = NULL;
 std::string g_dataFilePath;
-std::ofstream g_logFile;
 long long g_sessionStart = 0;
 bool g_sessionActive = false;
 bool g_shouldExit = false;
 bool g_shutdownInProgress = false;
 std::string g_lastFocusedWindowTitle = "";
 HWND g_lastFocusedWindow = NULL;
+
+// JSON data structures
+json g_sessionsData;
+json g_currentSession;
+json g_currentFocusEvent;
+bool g_hasActiveFocusEvent = false;
 
 // Function to get window title from window handle
 std::string GetWindowTitle(HWND hwnd) {
@@ -81,22 +89,48 @@ std::string GetUserDataPath() {
     return "focus_log.json"; // Fallback to current directory
 }
 
-// Function to escape JSON strings
-std::string EscapeJsonString(const std::string& str) {
-    std::string escaped;
-    for (char c : str) {
-        switch (c) {
-            case '"': escaped += "\\\""; break;
-            case '\\': escaped += "\\\\"; break;
-            case '\b': escaped += "\\b"; break;
-            case '\f': escaped += "\\f"; break;
-            case '\n': escaped += "\\n"; break;
-            case '\r': escaped += "\\r"; break;
-            case '\t': escaped += "\\t"; break;
-            default: escaped += c; break;
+// Function to load existing sessions from file
+void LoadExistingSessions() {
+    std::ifstream inFile(g_dataFilePath);
+    if (inFile.is_open()) {
+        // Check if file is empty
+        inFile.seekg(0, std::ios::end);
+        std::streampos fileSize = inFile.tellg();
+        inFile.seekg(0, std::ios::beg);
+        
+        if (fileSize == 0) {
+            // Empty file, initialize new structure
+            g_sessionsData = json::object();
+            g_sessionsData["sessions"] = json::array();
+            inFile.close();
+            return;
         }
+        
+        try {
+            inFile >> g_sessionsData;
+            inFile.close();
+        } catch (const json::exception& e) {
+            std::cerr << "Error parsing existing JSON file: " << e.what() << std::endl;
+            std::cerr << "Starting with a fresh sessions file." << std::endl;
+            g_sessionsData = json::object();
+            g_sessionsData["sessions"] = json::array();
+        }
+    } else {
+        // File doesn't exist, initialize new structure
+        g_sessionsData = json::object();
+        g_sessionsData["sessions"] = json::array();
     }
-    return escaped;
+}
+
+// Function to save sessions to file
+void SaveSessionsToFile() {
+    std::ofstream outFile(g_dataFilePath);
+    if (outFile.is_open()) {
+        outFile << g_sessionsData.dump(2) << std::endl; // Pretty print with 2-space indent
+        outFile.close();
+    } else {
+        std::cerr << "Error: Could not open file for writing: " << g_dataFilePath << std::endl;
+    }
 }
 
 // Function to start a new session
@@ -106,69 +140,53 @@ void StartSession() {
     
     g_dataFilePath = GetUserDataPath();
     
-    // Read existing data
-    std::ifstream inFile(g_dataFilePath);
-    std::string existingData;
-    if (inFile.is_open()) {
-        std::string line;
-        while (std::getline(inFile, line)) {
-            existingData += line + "\n";
-        }
-        inFile.close();
-    }
+    // Load existing sessions
+    LoadExistingSessions();
     
-    // Open file for writing
-    g_logFile.open(g_dataFilePath, std::ios::out | std::ios::trunc);
+    // Create new session object
+    g_currentSession = json::object();
+    g_currentSession["start_timestamp"] = g_sessionStart;
+    g_currentSession["end_timestamp"] = nullptr;
+    g_currentSession["window_focus"] = json::array();
     
-    if (existingData.empty()) {
-        // New file - start with sessions array
-        g_logFile << "{ \"sessions\": [\n";
-        g_logFile << "{\"start_timestamp\": " << g_sessionStart 
-                 << ", \"end_timestamp\": null, \"window_focus\": [";
-    } else {
-        // Existing file - find the last session and close it, then add new session
-        size_t lastBracket = existingData.rfind(']');
-        if (lastBracket != std::string::npos) {
-            // Remove the closing brackets and add new session
-            existingData = existingData.substr(0, lastBracket);
-            g_logFile << existingData;
-            if (existingData.find("window_events") != std::string::npos || existingData.find("window_focus") != std::string::npos) {
-                g_logFile << "],\n"; // Close previous session
-            }
-            g_logFile << "{\"start_timestamp\": " << g_sessionStart 
-                     << ", \"end_timestamp\": null, \"window_focus\": [";
-        } else {
-            // Corrupted file, start fresh
-            g_logFile << "{ \"sessions\": [\n";
-            g_logFile << "{\"start_timestamp\": " << g_sessionStart 
-                     << ", \"end_timestamp\": null, \"window_focus\": [";
-        }
-    }
+    g_hasActiveFocusEvent = false;
     
-    g_logFile.flush();
     std::cout << "Session started. Data will be saved to: " << g_dataFilePath << std::endl;
 }
 
-// Function to log window event (focus change or title change)
-void LogWindowEvent(const std::string& eventType, const std::string& windowTitle, const std::string& processName, const std::string& processPath) {
+// Function to log focus change
+void LogFocusChange(const std::string& windowTitle, const std::string& processName, const std::string& processPath) {
     if (!g_sessionActive) return;
     
     long long timestamp = GetUnixTimestamp();
     
-    // Check if this is the first event in the session
-    static bool firstEvent = true;
-    if (!firstEvent) {
-        g_logFile << ",\n";
+    // Save previous focus event if it exists
+    if (g_hasActiveFocusEvent) {
+        g_currentSession["window_focus"].push_back(g_currentFocusEvent);
     }
-    firstEvent = false;
     
-    g_logFile << "{\"event_type\": \"" << eventType << "\""
-             << ", \"timestamp\": " << timestamp
-             << ", \"window_title\": \"" << EscapeJsonString(windowTitle) << "\""
-             << ", \"process_name\": \"" << EscapeJsonString(processName) << "\""
-             << ", \"process_path\": \"" << EscapeJsonString(processPath) << "\"}";
+    // Create new focus event
+    g_currentFocusEvent = json::object();
+    g_currentFocusEvent["focus_timestamp"] = timestamp;
+    g_currentFocusEvent["window_title"] = windowTitle;
+    g_currentFocusEvent["process_name"] = processName;
+    g_currentFocusEvent["process_path"] = processPath;
+    g_currentFocusEvent["title_changes"] = json::array();
     
-    g_logFile.flush();
+    g_hasActiveFocusEvent = true;
+}
+
+// Function to log title change
+void LogTitleChange(const std::string& windowTitle) {
+    if (!g_sessionActive || !g_hasActiveFocusEvent) return;
+    
+    long long timestamp = GetUnixTimestamp();
+    
+    json titleChange = json::object();
+    titleChange["title_timestamp"] = timestamp;
+    titleChange["window_title"] = windowTitle;
+    
+    g_currentFocusEvent["title_changes"].push_back(titleChange);
 }
 
 // Function to end session
@@ -178,39 +196,19 @@ void EndSession() {
     long long sessionEnd = GetUnixTimestamp();
     g_sessionActive = false;
     
-    if (g_logFile.is_open()) {
-        // Close the current session
-        g_logFile << "]}";
-        g_logFile.close();
-        
-        // Read the file back and update the end timestamp
-        std::ifstream inFile(g_dataFilePath);
-        std::string content;
-        if (inFile.is_open()) {
-            std::string line;
-            while (std::getline(inFile, line)) {
-                content += line + "\n";
-            }
-            inFile.close();
-        }
-        
-        // Replace "end_timestamp": null with actual timestamp
-        size_t pos = content.find("\"end_timestamp\": null");
-        if (pos != std::string::npos) {
-            content.replace(pos, 22, "\"end_timestamp\": " + std::to_string(sessionEnd));
-        }
-        
-        // Add closing brackets if needed
-        if (content.back() != '\n') content += "\n";
-        content += "]}\n";
-        
-        // Write back to file
-        std::ofstream outFile(g_dataFilePath);
-        if (outFile.is_open()) {
-            outFile << content;
-            outFile.close();
-        }
+    // Save the last focus event if it exists
+    if (g_hasActiveFocusEvent) {
+        g_currentSession["window_focus"].push_back(g_currentFocusEvent);
     }
+    
+    // Set the end timestamp
+    g_currentSession["end_timestamp"] = sessionEnd;
+    
+    // Add current session to sessions array
+    g_sessionsData["sessions"].push_back(g_currentSession);
+    
+    // Save to file
+    SaveSessionsToFile();
     
     std::cout << "Session ended and data saved to: " << g_dataFilePath << std::endl;
 }
@@ -285,8 +283,8 @@ void CALLBACK WinEventProc(
         g_lastFocusedWindow = hwnd;
         g_lastFocusedWindowTitle = windowTitle;
         
-        // Log to JSON file
-        LogWindowEvent("focus_change", windowTitle, processName, processPath);
+        // Log to JSON
+        LogFocusChange(windowTitle, processName, processPath);
         
         std::cout << "Focus changed to: " << windowTitle << std::endl;
         std::cout << "  Process: " << processInfo << std::endl;
@@ -298,8 +296,8 @@ void CALLBACK WinEventProc(
         if (hwnd == g_lastFocusedWindow && windowTitle != g_lastFocusedWindowTitle && !windowTitle.empty()) {
             g_lastFocusedWindowTitle = windowTitle;
             
-            // Log to JSON file
-            LogWindowEvent("title_change", windowTitle, processName, processPath);
+            // Log to JSON
+            LogTitleChange(windowTitle);
             
             std::cout << "Title changed to: " << windowTitle << std::endl;
             std::cout << "  Process: " << processInfo << std::endl;
