@@ -14,6 +14,7 @@
 #include <map>
 #include <algorithm>
 #include "json.hpp"
+#include "session_logger.h"
 
 using json = nlohmann::json;
 
@@ -56,6 +57,9 @@ std::string g_dataFilePath;
 
 // Icon cache: maps process path to DirectX texture
 std::map<std::string, ID3D11ShaderResourceView*> g_iconCache;
+
+// Session logger instance
+SessionLogger g_sessionLogger;
 
 // Helper function to get user data path
 std::string GetUserDataPath() {
@@ -407,6 +411,36 @@ int main(int, char**)
             {
                 LoadSessions();
             }
+            
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            // Session recording controls
+            if (g_sessionLogger.IsSessionActive())
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.2f, 1.0f)); // Green
+                ImGui::Text("Recording...");
+                ImGui::PopStyleColor();
+                
+                ImGui::SameLine();
+                if (ImGui::Button("Stop Session"))
+                {
+                    g_sessionLogger.StopSession();
+                    LoadSessions(); // Reload to show the new session
+                }
+            }
+            else
+            {
+                if (ImGui::Button("Start Session"))
+                {
+                    if (g_sessionLogger.StartSession())
+                    {
+                        // Session started successfully
+                    }
+                }
+            }
+            
             ImGui::EndMenuBar();
         }
 
