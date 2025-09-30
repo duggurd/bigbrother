@@ -123,6 +123,20 @@ void TimelineView::RenderFocusEvent(const WindowFocusEvent& event, const Session
     bool event_open = ImGui::TreeNode(event_header.c_str());
     ImGui::PopStyleColor();
     
+    // Right-click context menu
+    if (ImGui::BeginPopupContextItem())
+    {
+        std::string menu_text = "Add '" + event.process_name + "' to filters";
+        if (ImGui::MenuItem(menu_text.c_str()))
+        {
+            if (m_filterManager.AddFilter(event.process_name, true))
+            {
+                m_filterManager.SaveSettings();
+            }
+        }
+        ImGui::EndPopup();
+    }
+    
     if (event_open)
     {
         ImGui::Text("Path: %s", event.process_path.c_str());
