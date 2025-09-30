@@ -43,3 +43,7 @@ Thumbs.db
 # Old build files (legacy) - all moved to new structure
 *.old
 *.bak
+
+# Release packaging
+release/
+*.zip
