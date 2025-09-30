@@ -204,7 +204,7 @@ public:
         s_instance = nullptr;
     }
 
-    bool StartSession() {
+    bool StartSession(const std::string& comment = "") {
         if (m_sessionActive) {
             return false; // Already active
         }
@@ -218,6 +218,7 @@ public:
         m_currentSession = json::object();
         m_currentSession["start_timestamp"] = m_sessionStart;
         m_currentSession["end_timestamp"] = nullptr;
+        m_currentSession["comment"] = comment;
         m_currentSession["window_focus"] = json::array();
         
         m_hasActiveFocusEvent = false;
@@ -249,6 +250,17 @@ public:
     void StopSession() {
         if (!m_sessionActive) return;
         
+        // Unhook events FIRST to prevent race conditions
+        if (m_hFocusHook) {
+            UnhookWinEvent(m_hFocusHook);
+            m_hFocusHook = NULL;
+        }
+        if (m_hTitleHook) {
+            UnhookWinEvent(m_hTitleHook);
+            m_hTitleHook = NULL;
+        }
+        
+        // Now safe to finalize session data
         long long sessionEnd = bigbrother::GetUnixTimestamp();
         m_sessionActive = false;
         
@@ -260,15 +272,6 @@ public:
         m_sessionsData["sessions"].push_back(m_currentSession);
         
         SaveSessionsToFile();
-        
-        if (m_hFocusHook) {
-            UnhookWinEvent(m_hFocusHook);
-            m_hFocusHook = NULL;
-        }
-        if (m_hTitleHook) {
-            UnhookWinEvent(m_hTitleHook);
-            m_hTitleHook = NULL;
-        }
     }
 
     bool IsSessionActive() const {

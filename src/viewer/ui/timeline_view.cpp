@@ -75,6 +75,11 @@ void TimelineView::RenderSession(const Session& session, int sessionIndex) {
                         "  (" + start_time + " - " + end_time + ", " + 
                         FormatDuration(session_duration) + ")";
     
+    // Add comment if present
+    if (!session.comment.empty()) {
+        session_header += " - " + session.comment;
+    }
+    
     // Session tree node with distinct color
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 1.0f, 0.6f, 1.0f)); // Light green
     bool session_open = ImGui::TreeNodeEx(session_header.c_str(), ImGuiTreeNodeFlags_DefaultOpen);

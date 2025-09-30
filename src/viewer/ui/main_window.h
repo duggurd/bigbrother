@@ -55,9 +55,14 @@ private:
     int m_deleteSessionIndex = -1;
     bool m_showDeleteConfirmation = false;
 
+    // Start session state
+    bool m_showStartSessionDialog = false;
+    char m_sessionComment[256] = "";
+
     // UI
     void RenderMenuBar();
     void RenderDeleteConfirmation();
+    void RenderStartSessionDialog();
 };
 
 } // namespace viewer

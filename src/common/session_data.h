@@ -23,6 +23,7 @@ struct WindowFocusEvent {
 struct Session {
     long long start_timestamp;
     long long end_timestamp;
+    std::string comment;  // User's description of what they're working on
     std::vector<WindowFocusEvent> window_focus;
 };
 

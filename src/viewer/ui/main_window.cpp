@@ -46,6 +46,9 @@ void MainWindow::Render() {
     
     // Delete confirmation dialog
     RenderDeleteConfirmation();
+    
+    // Start session dialog
+    RenderStartSessionDialog();
 }
 
 void MainWindow::ReloadSessions() {
@@ -85,10 +88,8 @@ void MainWindow::RenderMenuBar() {
         {
             if (ImGui::Button("Start Session"))
             {
-                if (m_sessionLogger.StartSession())
-                {
-                    // Session started successfully
-                }
+                m_showStartSessionDialog = true;
+                m_sessionComment[0] = '\0'; // Clear comment
             }
         }
         
@@ -163,6 +164,57 @@ void MainWindow::RenderDeleteConfirmation() {
         if (ImGui::Button("Cancel", ImVec2(120, 0)))
         {
             m_showDeleteConfirmation = false;
+            ImGui::CloseCurrentPopup();
+        }
+        
+        ImGui::EndPopup();
+    }
+}
+
+void MainWindow::RenderStartSessionDialog() {
+    if (!m_showStartSessionDialog) return;
+    
+    ImGui::OpenPopup("Start Session");
+    
+    // Center the modal
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    
+    if (ImGui::BeginPopupModal("Start Session", &m_showStartSessionDialog, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::Text("What are you doing?");
+        ImGui::Spacing();
+        
+        // Auto-focus the text input when dialog opens
+        if (ImGui::IsWindowAppearing()) {
+            ImGui::SetKeyboardFocusHere();
+        }
+        
+        bool enter_pressed = ImGui::InputText("##comment", m_sessionComment, sizeof(m_sessionComment), 
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        
+        if (ImGui::Button("Start", ImVec2(120, 0)) || enter_pressed)
+        {
+            // Start session with the comment
+            std::string comment(m_sessionComment);
+            if (m_sessionLogger.StartSession(comment))
+            {
+                // Session started successfully
+            }
+            m_showStartSessionDialog = false;
+            ImGui::CloseCurrentPopup();
+        }
+        
+        ImGui::SetItemDefaultFocus();
+        ImGui::SameLine();
+        
+        if (ImGui::Button("Cancel", ImVec2(120, 0)))
+        {
+            m_showStartSessionDialog = false;
             ImGui::CloseCurrentPopup();
         }
         

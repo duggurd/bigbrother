@@ -52,6 +52,7 @@ Session SessionLoader::ParseSession(const json& sessionJson) {
     Session session;
     session.start_timestamp = sessionJson.value("start_timestamp", 0LL);
     session.end_timestamp = sessionJson.value("end_timestamp", 0LL);
+    session.comment = sessionJson.value("comment", "");
     
     if (sessionJson.contains("window_focus") && sessionJson["window_focus"].is_array()) {
         for (const auto& focusJson : sessionJson["window_focus"]) {
@@ -102,6 +103,7 @@ bool SessionLoader::SaveToFile(const std::string& filePath, const std::vector<Se
             json sessionJson;
             sessionJson["start_timestamp"] = session.start_timestamp;
             sessionJson["end_timestamp"] = session.end_timestamp;
+            sessionJson["comment"] = session.comment;
             sessionJson["window_focus"] = json::array();
             
             // Convert focus events
