@@ -246,8 +246,11 @@ int main(int, char**)
                 // Calculate duration
                 long long duration = session.end_timestamp - session.start_timestamp;
                 
-                // Session header
-                std::string header = "Session " + std::to_string(i + 1);
+                // Session header with timestamps
+                std::string start_time = FormatTime(session.start_timestamp);
+                std::string end_time = FormatTime(session.end_timestamp);
+                std::string header = "Session " + std::to_string(i + 1) + 
+                                    "  (" + start_time + " - " + end_time + ")";
                 bool is_selected = (g_selectedSession == i);
                 
                 if (ImGui::Selectable(header.c_str(), is_selected, 0, ImVec2(0, 0)))
@@ -295,11 +298,16 @@ int main(int, char**)
                         duration = session.end_timestamp - event.focus_timestamp;
                     }
                     
-                    // Event header
+                    // Event header with bold text
                     std::string time_str = FormatTime(event.focus_timestamp);
-                    std::string header = time_str + " - " + event.process_name;
+                    std::string header = time_str + " - " + event.process_name + " (" + FormatDuration(duration) + ")";
                     
-                    if (ImGui::TreeNode(header.c_str()))
+                    // Make the header bold and more visible
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.6f, 1.0f)); // Light yellow color
+                    bool node_open = ImGui::TreeNode(header.c_str());
+                    ImGui::PopStyleColor();
+                    
+                    if (node_open)
                     {
                         ImGui::Text("Title: %s", event.window_title.c_str());
                         ImGui::Text("Path:  %s", event.process_path.c_str());

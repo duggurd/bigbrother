@@ -269,8 +269,9 @@ void CALLBACK WinEventProc(
     if (parenPos != std::string::npos) {
         processName = processInfo.substr(0, parenPos);
         size_t pathStart = parenPos + 2;
-        size_t pathEnd = processInfo.find(")", pathStart);
-        if (pathEnd != std::string::npos) {
+        // Find the LAST closing paren to handle paths with parentheses like "C:\Program Files (x86)\..."
+        size_t pathEnd = processInfo.rfind(")");
+        if (pathEnd != std::string::npos && pathEnd > pathStart) {
             processPath = processInfo.substr(pathStart, pathEnd - pathStart);
         }
     } else {
