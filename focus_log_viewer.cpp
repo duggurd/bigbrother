@@ -231,6 +231,32 @@ std::string FormatTime(long long timestamp) {
     return std::string(buffer);
 }
 
+// Helper function to format date only
+std::string FormatDate(long long timestamp) {
+    if (timestamp == 0) return "N/A";
+    
+    time_t rawtime = (time_t)timestamp;
+    struct tm timeinfo;
+    localtime_s(&timeinfo, &rawtime);
+    
+    char buffer[80];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d", &timeinfo);
+    return std::string(buffer);
+}
+
+// Helper function to format date with day of week
+std::string FormatDateWithDay(long long timestamp) {
+    if (timestamp == 0) return "N/A";
+    
+    time_t rawtime = (time_t)timestamp;
+    struct tm timeinfo;
+    localtime_s(&timeinfo, &rawtime);
+    
+    char buffer[80];
+    strftime(buffer, sizeof(buffer), "%A, %B %d, %Y", &timeinfo);
+    return std::string(buffer);
+}
+
 // Helper function to format duration
 std::string FormatDuration(long long seconds) {
     if (seconds < 60) {
@@ -390,9 +416,29 @@ int main(int, char**)
         
         if (ImGui::BeginChild("UnifiedTimeline", ImVec2(0, -30), true))
         {
+            std::string lastDate = "";
+            
             for (int sessionIdx = 0; sessionIdx < g_sessions.size(); sessionIdx++)
             {
                 const auto& session = g_sessions[sessionIdx];
+                
+                // Check if we need to display a new date header
+                std::string currentDate = FormatDate(session.start_timestamp);
+                if (currentDate != lastDate)
+                {
+                    if (sessionIdx > 0) {
+                        ImGui::Spacing();
+                        ImGui::Spacing();
+                    }
+                    
+                    // Display date header (non-expandable)
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 1.0f, 1.0f)); // Light blue
+                    ImGui::TextUnformatted(("--- " + FormatDateWithDay(session.start_timestamp) + " ---").c_str());
+                    ImGui::PopStyleColor();
+                    ImGui::Spacing();
+                    
+                    lastDate = currentDate;
+                }
                 
                 ImGui::PushID(sessionIdx);
                 
