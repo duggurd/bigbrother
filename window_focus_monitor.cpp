@@ -165,15 +165,17 @@ void LogFocusChange(const std::string& windowTitle, const std::string& processNa
         g_currentSession["window_focus"].push_back(g_currentFocusEvent);
     }
     
-    // Create new focus event
+    // Create new focus event (without window_title in the main event)
     g_currentFocusEvent = json::object();
     g_currentFocusEvent["focus_timestamp"] = timestamp;
-    g_currentFocusEvent["window_title"] = windowTitle;
     g_currentFocusEvent["process_name"] = processName;
     g_currentFocusEvent["process_path"] = processPath;
     g_currentFocusEvent["title_changes"] = json::array();
     
     g_hasActiveFocusEvent = true;
+    
+    // Immediately log the initial window title as a title change event
+    LogTitleChange(windowTitle);
 }
 
 // Function to log title change

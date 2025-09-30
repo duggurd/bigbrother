@@ -52,7 +52,7 @@ if %ERRORLEVEL% EQU 0 (
             imgui\imgui_widgets.cpp ^
             imgui\backends\imgui_impl_win32.cpp ^
             imgui\backends\imgui_impl_dx11.cpp ^
-            /link user32.lib gdi32.lib shell32.lib d3d11.lib d3dcompiler.lib dxgi.lib ^
+            /link user32.lib gdi32.lib shell32.lib d3d11.lib d3dcompiler.lib dxgi.lib ole32.lib ^
             /OUT:focus_log_viewer.exe
         
         if %ERRORLEVEL% EQU 0 (
@@ -88,7 +88,7 @@ if %ERRORLEVEL% EQU 0 (
         imgui\backends\imgui_impl_win32.cpp ^
         imgui\backends\imgui_impl_dx11.cpp ^
         -I. -Iimgui -Iimgui\backends ^
-        -luser32 -lgdi32 -lshell32 -ld3d11 -ld3dcompiler -ldxgi
+        -luser32 -lgdi32 -lshell32 -ld3d11 -ld3dcompiler -ldxgi -lole32
     
     if %ERRORLEVEL% EQU 0 (
         echo.

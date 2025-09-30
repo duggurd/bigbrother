@@ -80,10 +80,13 @@ The program automatically saves all session data to:
       "window_focus": [
         {
           "focus_timestamp": 1695910250,
-          "window_title": "Visual Studio Code",
           "process_name": "Code.exe",
           "process_path": "C:\\Users\\username\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
           "title_changes": [
+            {
+              "title_timestamp": 1695910250,
+              "window_title": "Visual Studio Code"
+            },
             {
               "title_timestamp": 1695910275,
               "window_title": "main.cpp - Visual Studio Code"
@@ -96,10 +99,13 @@ The program automatically saves all session data to:
         },
         {
           "focus_timestamp": 1695910300,
-          "window_title": "Google Chrome",
           "process_name": "chrome.exe",
           "process_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
           "title_changes": [
+            {
+              "title_timestamp": 1695910300,
+              "window_title": "Google Chrome"
+            },
             {
               "title_timestamp": 1695910310,
               "window_title": "GitHub - Google Chrome"
@@ -115,6 +121,8 @@ The program automatically saves all session data to:
   ]
 }
 ```
+
+**Note:** The initial window title is now recorded as the first entry in `title_changes` array (with the same timestamp as `focus_timestamp`), making the data structure more consistent.
 
 ## Console Output
 ```

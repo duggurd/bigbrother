@@ -10,6 +10,8 @@
 #include <iomanip>
 #include <ctime>
 #include <shlobj.h>
+#include <shellapi.h>
+#include <map>
 #include "json.hpp"
 
 using json = nlohmann::json;
@@ -35,7 +37,6 @@ struct TitleChange {
 
 struct WindowFocusEvent {
     long long focus_timestamp;
-    std::string window_title;
     std::string process_name;
     std::string process_path;
     std::vector<TitleChange> title_changes;
@@ -53,6 +54,9 @@ std::vector<Session> g_sessions;
 std::string g_dataFilePath;
 int g_selectedSession = -1;
 
+// Icon cache: maps process path to DirectX texture
+std::map<std::string, ID3D11ShaderResourceView*> g_iconCache;
+
 // Helper function to get user data path
 std::string GetUserDataPath() {
     char path[MAX_PATH];
@@ -60,6 +64,133 @@ std::string GetUserDataPath() {
         return std::string(path) + "\\BigBrother\\focus_log.json";
     }
     return "focus_log.json";
+}
+
+// Helper function to convert HICON to DirectX 11 texture
+ID3D11ShaderResourceView* CreateTextureFromIcon(HICON hIcon) {
+    if (!hIcon) return nullptr;
+    
+    ICONINFO iconInfo;
+    if (!GetIconInfo(hIcon, &iconInfo)) {
+        return nullptr;
+    }
+    
+    BITMAP bmp;
+    GetObject(iconInfo.hbmColor, sizeof(BITMAP), &bmp);
+    
+    int width = bmp.bmWidth;
+    int height = bmp.bmHeight;
+    
+    // Create a DIB section to get the icon bitmap data
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height; // Top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    
+    void* bits = nullptr;
+    HDC hdc = GetDC(NULL);
+    HBITMAP hDIB = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+    
+    if (hDIB && bits) {
+        HDC hdcMem = CreateCompatibleDC(hdc);
+        HBITMAP hOldBitmap = (HBITMAP)SelectObject(hdcMem, hDIB);
+        
+        // Draw icon into DIB
+        DrawIconEx(hdcMem, 0, 0, hIcon, width, height, 0, NULL, DI_NORMAL);
+        
+        SelectObject(hdcMem, hOldBitmap);
+        DeleteDC(hdcMem);
+        
+        // Create DirectX texture
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width = width;
+        desc.Height = height;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        
+        D3D11_SUBRESOURCE_DATA initData = {};
+        initData.pSysMem = bits;
+        initData.SysMemPitch = width * 4;
+        
+        ID3D11Texture2D* pTexture = nullptr;
+        HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &initData, &pTexture);
+        
+        ID3D11ShaderResourceView* pSRV = nullptr;
+        if (SUCCEEDED(hr)) {
+            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+            srvDesc.Format = desc.Format;
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Texture2D.MipLevels = 1;
+            
+            hr = g_pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, &pSRV);
+            pTexture->Release();
+        }
+        
+        DeleteObject(hDIB);
+        ReleaseDC(NULL, hdc);
+        
+        return pSRV;
+    }
+    
+    ReleaseDC(NULL, hdc);
+    DeleteObject(iconInfo.hbmColor);
+    DeleteObject(iconInfo.hbmMask);
+    
+    return nullptr;
+}
+
+// Extract icon from executable and convert to DirectX texture
+ID3D11ShaderResourceView* GetApplicationIcon(const std::string& exePath) {
+    // Check cache first
+    auto it = g_iconCache.find(exePath);
+    if (it != g_iconCache.end()) {
+        return it->second;
+    }
+    
+    // Extract icon from executable
+    HICON hIcon = nullptr;
+    
+    // Try to get the icon using SHGetFileInfo first (faster)
+    SHFILEINFOA sfi = {};
+    if (SHGetFileInfoA(exePath.c_str(), 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON)) {
+        hIcon = sfi.hIcon;
+    }
+    
+    // If that didn't work, try ExtractIcon
+    if (!hIcon) {
+        hIcon = ExtractIconA(GetModuleHandle(NULL), exePath.c_str(), 0);
+        if (hIcon == (HICON)1 || !hIcon) { // ExtractIcon returns 1 if no icon
+            hIcon = nullptr;
+        }
+    }
+    
+    ID3D11ShaderResourceView* texture = nullptr;
+    if (hIcon) {
+        texture = CreateTextureFromIcon(hIcon);
+        DestroyIcon(hIcon);
+    }
+    
+    // Cache the result (even if null, to avoid repeated failures)
+    g_iconCache[exePath] = texture;
+    
+    return texture;
+}
+
+// Clean up icon cache
+void CleanupIconCache() {
+    for (auto& pair : g_iconCache) {
+        if (pair.second) {
+            pair.second->Release();
+        }
+    }
+    g_iconCache.clear();
 }
 
 // Helper function to format timestamp
@@ -127,7 +258,6 @@ void LoadSessions() {
                     for (const auto& focusJson : sessionJson["window_focus"]) {
                         WindowFocusEvent event;
                         event.focus_timestamp = focusJson.value("focus_timestamp", 0LL);
-                        event.window_title = focusJson.value("window_title", "");
                         event.process_name = focusJson.value("process_name", "");
                         event.process_path = focusJson.value("process_path", "");
                         
@@ -137,6 +267,18 @@ void LoadSessions() {
                                 tc.timestamp = titleJson.value("title_timestamp", 0LL);
                                 tc.title = titleJson.value("window_title", "");
                                 event.title_changes.push_back(tc);
+                            }
+                        }
+                        
+                        // Backward compatibility: if old data has window_title in focus event,
+                        // move it to the first title change
+                        if (focusJson.contains("window_title") && !focusJson["window_title"].is_null()) {
+                            std::string old_title = focusJson.value("window_title", "");
+                            if (!old_title.empty() && event.title_changes.empty()) {
+                                TitleChange tc;
+                                tc.timestamp = event.focus_timestamp;
+                                tc.title = old_title;
+                                event.title_changes.insert(event.title_changes.begin(), tc);
                             }
                         }
                         
@@ -298,9 +440,18 @@ int main(int, char**)
                         duration = session.end_timestamp - event.focus_timestamp;
                     }
                     
-                    // Event header with bold text
+                    // Event header with icon and bold text
                     std::string time_str = FormatTime(event.focus_timestamp);
                     std::string header = time_str + " - " + event.process_name + " (" + FormatDuration(duration) + ")";
+                    
+                    // Get application icon
+                    ID3D11ShaderResourceView* icon = GetApplicationIcon(event.process_path);
+                    
+                    // Display icon if available
+                    if (icon) {
+                        ImGui::Image((void*)icon, ImVec2(16, 16));
+                        ImGui::SameLine();
+                    }
                     
                     // Make the header bold and more visible
                     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.6f, 1.0f)); // Light yellow color
@@ -309,14 +460,13 @@ int main(int, char**)
                     
                     if (node_open)
                     {
-                        ImGui::Text("Title: %s", event.window_title.c_str());
                         ImGui::Text("Path:  %s", event.process_path.c_str());
                         ImGui::Text("Duration: %s", FormatDuration(duration).c_str());
-                        ImGui::Text("Title Changes: %d", (int)event.title_changes.size());
                         
                         if (!event.title_changes.empty())
                         {
                             ImGui::Spacing();
+                            ImGui::Text("Window Titles:");
                             ImGui::Indent();
                             for (const auto& tc : event.title_changes)
                             {
@@ -324,6 +474,10 @@ int main(int, char**)
                                 ImGui::BulletText("%s", tc_str.c_str());
                             }
                             ImGui::Unindent();
+                        }
+                        else
+                        {
+                            ImGui::Text("Window Titles: None recorded");
                         }
                         
                         ImGui::TreePop();
@@ -387,6 +541,7 @@ int main(int, char**)
     }
 
     // Cleanup
+    CleanupIconCache();
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
