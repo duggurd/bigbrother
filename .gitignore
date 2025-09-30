@@ -1,2 +1,49 @@
+# Build outputs
+build/
 *.exe
 *.obj
+*.o
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake
+!CMakeLists.txt
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.VC.db
+*.VC.opendb
+
+# ImGui
+third_party/imgui/
+imgui.ini
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Old build files (legacy)
+window_focus_monitor.exe
+focus_log_viewer.exe
+*.obj
+session_logger.h.old
+window_focus_monitor.cpp.old
+focus_log_viewer.cpp.old
