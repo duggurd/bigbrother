@@ -63,7 +63,15 @@ SessionLogger g_sessionLogger;
 
 // UI Settings
 bool g_showSettingsWindow = false;
-bool g_filterExplorerExe = false;
+
+// Program filter settings
+struct ProgramFilter {
+    std::string program_name;
+    bool enabled;
+};
+
+std::vector<ProgramFilter> g_programFilters;
+char g_newProgramName[256] = "";
 
 // Helper function to get user data path
 std::string GetUserDataPath() {
@@ -511,8 +519,15 @@ int main(int, char**)
                     {
                         const auto& event = session.window_focus[eventIdx];
                         
-                        // Apply explorer.exe filter if enabled
-                        if (g_filterExplorerExe && event.process_name == "explorer.exe") {
+                        // Apply program filters
+                        bool filtered = false;
+                        for (const auto& filter : g_programFilters) {
+                            if (filter.enabled && event.process_name == filter.program_name) {
+                                filtered = true;
+                                break;
+                            }
+                        }
+                        if (filtered) {
                             continue; // Skip this event
                         }
                         
@@ -633,20 +648,96 @@ int main(int, char**)
         // Settings Window
         if (g_showSettingsWindow)
         {
-            ImGui::SetNextWindowSize(ImVec2(400, 200), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(500, 400), ImGuiCond_FirstUseEver);
             ImGui::Begin("Settings", &g_showSettingsWindow);
             
-            ImGui::Text("Display Filters");
+            ImGui::Text("Program Filters");
             ImGui::Separator();
             ImGui::Spacing();
             
-            if (ImGui::Checkbox("Filter out explorer.exe events", &g_filterExplorerExe))
+            ImGui::TextWrapped("Hide focus events from specific programs. Check the box to enable filtering for that program.");
+            ImGui::Spacing();
+            
+            // Add new program section
+            ImGui::Text("Add Program:");
+            ImGui::PushItemWidth(300);
+            ImGui::InputText("##newprogram", g_newProgramName, sizeof(g_newProgramName));
+            ImGui::PopItemWidth();
+            ImGui::SameLine();
+            if (ImGui::Button("Add"))
             {
-                // Filter state changed, no action needed (applied on next frame)
+                std::string programName = std::string(g_newProgramName);
+                if (!programName.empty())
+                {
+                    // Check if program already exists
+                    bool exists = false;
+                    for (const auto& filter : g_programFilters) {
+                        if (filter.program_name == programName) {
+                            exists = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!exists) {
+                        ProgramFilter newFilter;
+                        newFilter.program_name = programName;
+                        newFilter.enabled = true;
+                        g_programFilters.push_back(newFilter);
+                        
+                        // Clear input field
+                        g_newProgramName[0] = '\0';
+                    }
+                }
             }
             
             ImGui::Spacing();
-            ImGui::TextWrapped("When enabled, all window focus events from Windows Explorer will be hidden from the timeline view.");
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            // List of filtered programs
+            ImGui::Text("Filtered Programs:");
+            ImGui::BeginChild("FilterList", ImVec2(0, 200), true);
+            
+            // Track which filter to delete (if any)
+            int deleteIndex = -1;
+            
+            for (int i = 0; i < g_programFilters.size(); i++)
+            {
+                ImGui::PushID(i);
+                
+                // Checkbox to enable/disable filter
+                ImGui::Checkbox("##enabled", &g_programFilters[i].enabled);
+                ImGui::SameLine();
+                
+                // Program name
+                ImGui::Text("%s", g_programFilters[i].program_name.c_str());
+                ImGui::SameLine();
+                
+                // Delete button (right-aligned)
+                float buttonX = ImGui::GetContentRegionAvail().x - 60;
+                if (buttonX > 0) {
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + buttonX);
+                }
+                if (ImGui::Button("Delete"))
+                {
+                    deleteIndex = i;
+                }
+                
+                ImGui::PopID();
+            }
+            
+            // Delete filter if requested
+            if (deleteIndex >= 0 && deleteIndex < g_programFilters.size())
+            {
+                g_programFilters.erase(g_programFilters.begin() + deleteIndex);
+            }
+            
+            if (g_programFilters.empty())
+            {
+                ImGui::TextDisabled("No programs filtered. Add one above.");
+            }
+            
+            ImGui::EndChild();
             
             ImGui::Spacing();
             ImGui::Separator();
