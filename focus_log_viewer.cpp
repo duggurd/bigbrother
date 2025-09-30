@@ -104,6 +104,18 @@ ID3D11ShaderResourceView* CreateTextureFromIcon(HICON hIcon) {
         SelectObject(hdcMem, hOldBitmap);
         DeleteDC(hdcMem);
         
+        // Convert BGRA to RGBA (Windows uses BGRA, DirectX expects RGBA)
+        unsigned char* pixels = (unsigned char*)bits;
+        int totalPixels = width * height;
+        for (int i = 0; i < totalPixels; i++) {
+            int idx = i * 4;
+            unsigned char b = pixels[idx + 0];
+            unsigned char r = pixels[idx + 2];
+            pixels[idx + 0] = r;  // Red
+            pixels[idx + 2] = b;  // Blue
+            // Green (idx+1) and Alpha (idx+3) stay the same
+        }
+        
         // Create DirectX texture
         D3D11_TEXTURE2D_DESC desc = {};
         desc.Width = width;
