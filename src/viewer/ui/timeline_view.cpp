@@ -80,6 +80,18 @@ void TimelineView::RenderSession(const Session& session, int sessionIndex) {
     bool session_open = ImGui::TreeNodeEx(session_header.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
     ImGui::PopStyleColor();
     
+    // Right-click context menu for session
+    if (ImGui::BeginPopupContextItem())
+    {
+        if (ImGui::MenuItem("Delete Session"))
+        {
+            if (m_deleteSessionCallback) {
+                m_deleteSessionCallback(sessionIndex);
+            }
+        }
+        ImGui::EndPopup();
+    }
+    
     if (session_open)
     {
         // Display focus events for this session

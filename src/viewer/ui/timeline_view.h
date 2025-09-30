@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <functional>
 #include "session_data.h"
 #include "graphics/icon_manager.h"
 #include "data/filter_manager.h"
@@ -25,9 +26,18 @@ public:
      */
     void Render(const std::vector<Session>& sessions);
 
+    /**
+     * @brief Set callback for session deletion requests
+     * @param callback Function to call when user wants to delete a session
+     */
+    void SetDeleteSessionCallback(std::function<void(int)> callback) {
+        m_deleteSessionCallback = callback;
+    }
+
 private:
     IconManager& m_iconManager;
     FilterManager& m_filterManager;
+    std::function<void(int)> m_deleteSessionCallback;
 
     // Render a single session
     void RenderSession(const Session& session, int sessionIndex);

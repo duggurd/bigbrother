@@ -32,6 +32,12 @@ public:
      */
     void ReloadSessions();
 
+    /**
+     * @brief Request deletion of a session
+     * @param sessionIndex Index of session to delete
+     */
+    void RequestDeleteSession(int sessionIndex);
+
 private:
     // Components
     SessionLogger m_sessionLogger;
@@ -45,8 +51,13 @@ private:
     std::vector<Session> m_sessions;
     std::string m_dataFilePath;
 
+    // Deletion state
+    int m_deleteSessionIndex = -1;
+    bool m_showDeleteConfirmation = false;
+
     // UI
     void RenderMenuBar();
+    void RenderDeleteConfirmation();
 };
 
 } // namespace viewer

@@ -92,5 +92,62 @@ WindowFocusEvent SessionLoader::ParseFocusEvent(const json& eventJson) {
     return event;
 }
 
+bool SessionLoader::SaveToFile(const std::string& filePath, const std::vector<Session>& sessions) {
+    try {
+        json data;
+        data["sessions"] = json::array();
+        
+        // Convert sessions to JSON
+        for (const auto& session : sessions) {
+            json sessionJson;
+            sessionJson["start_timestamp"] = session.start_timestamp;
+            sessionJson["end_timestamp"] = session.end_timestamp;
+            sessionJson["window_focus"] = json::array();
+            
+            // Convert focus events
+            for (const auto& event : session.window_focus) {
+                json eventJson;
+                eventJson["focus_timestamp"] = event.focus_timestamp;
+                eventJson["process_name"] = event.process_name;
+                eventJson["process_path"] = event.process_path;
+                eventJson["title_changes"] = json::array();
+                
+                // Convert title changes
+                for (const auto& tc : event.title_changes) {
+                    json tcJson;
+                    tcJson["title_timestamp"] = tc.timestamp;
+                    tcJson["window_title"] = tc.title;
+                    eventJson["title_changes"].push_back(tcJson);
+                }
+                
+                sessionJson["window_focus"].push_back(eventJson);
+            }
+            
+            data["sessions"].push_back(sessionJson);
+        }
+        
+        // Write to file
+        std::ofstream outFile(filePath);
+        if (!outFile.is_open()) {
+            return false;
+        }
+        
+        outFile << data.dump(2); // Pretty print with 2-space indent
+        outFile.close();
+        return true;
+    } catch (const json::exception& e) {
+        return false;
+    }
+}
+
+bool SessionLoader::DeleteSession(std::vector<Session>& sessions, int sessionIndex) {
+    if (sessionIndex < 0 || sessionIndex >= sessions.size()) {
+        return false;
+    }
+    
+    sessions.erase(sessions.begin() + sessionIndex);
+    return true;
+}
+
 } // namespace viewer
 } // namespace bigbrother

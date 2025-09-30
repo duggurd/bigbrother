@@ -29,6 +29,22 @@ public:
      */
     std::string GetDefaultDataPath() const;
 
+    /**
+     * @brief Save sessions to JSON file
+     * @param filePath Path to focus_log.json
+     * @param sessions Vector of sessions to save
+     * @return true if saved successfully
+     */
+    bool SaveToFile(const std::string& filePath, const std::vector<Session>& sessions);
+
+    /**
+     * @brief Delete a session by index
+     * @param sessions Vector of sessions
+     * @param sessionIndex Index of session to delete
+     * @return true if deleted successfully
+     */
+    bool DeleteSession(std::vector<Session>& sessions, int sessionIndex);
+
 private:
     // Helper to parse a single session from JSON
     Session ParseSession(const nlohmann::json& sessionJson);
