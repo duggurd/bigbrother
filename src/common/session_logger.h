@@ -27,6 +27,12 @@ private:
     json m_currentSession;
     json m_currentFocusEvent;
     bool m_hasActiveFocusEvent = false;
+    
+    // Incremental write support
+    int m_eventsSinceLastFlush = 0;
+    std::chrono::steady_clock::time_point m_lastFlushTime;
+    static const int FLUSH_EVENT_THRESHOLD = 10;  // Flush every 10 events
+    static const int FLUSH_TIME_THRESHOLD_SECONDS = 30;  // Flush every 30 seconds
 
     // Static instance pointer for callbacks
     static SessionLogger* s_instance;
@@ -83,38 +89,154 @@ private:
     }
 
     void LoadExistingSessions() {
+        // Don't load all sessions into memory - just check if file exists
+        // We'll append our session when saving
         std::ifstream inFile(m_dataFilePath);
         if (inFile.is_open()) {
             inFile.seekg(0, std::ios::end);
             std::streampos fileSize = inFile.tellg();
-            inFile.seekg(0, std::ios::beg);
+            inFile.close();
             
             if (fileSize == 0) {
+                // File is empty, initialize structure
                 m_sessionsData = json::object();
                 m_sessionsData["sessions"] = json::array();
-                inFile.close();
-                return;
-            }
-            
-            try {
-                inFile >> m_sessionsData;
-                inFile.close();
-            } catch (const json::exception& e) {
+            } else {
+                // File exists and has content, we'll load it only when needed for flushing
                 m_sessionsData = json::object();
                 m_sessionsData["sessions"] = json::array();
             }
         } else {
+            // File doesn't exist, initialize structure
             m_sessionsData = json::object();
             m_sessionsData["sessions"] = json::array();
         }
     }
 
     void SaveSessionsToFile() {
+        // Load existing sessions from file
+        json allSessions;
+        std::ifstream inFile(m_dataFilePath);
+        if (inFile.is_open()) {
+            inFile.seekg(0, std::ios::end);
+            std::streampos fileSize = inFile.tellg();
+            inFile.seekg(0, std::ios::beg);
+            
+            if (fileSize > 0) {
+                try {
+                    inFile >> allSessions;
+                } catch (const json::exception& e) {
+                    allSessions = json::object();
+                    allSessions["sessions"] = json::array();
+                }
+            } else {
+                allSessions = json::object();
+                allSessions["sessions"] = json::array();
+            }
+            inFile.close();
+        } else {
+            allSessions = json::object();
+            allSessions["sessions"] = json::array();
+        }
+        
+        // Append our current session
+        allSessions["sessions"].push_back(m_currentSession);
+        
+        // Write to file
         std::ofstream outFile(m_dataFilePath);
         if (outFile.is_open()) {
-            outFile << m_sessionsData.dump(2) << std::endl;
+            outFile << allSessions.dump(2) << std::endl;
             outFile.close();
         }
+    }
+    
+    void FlushCurrentSession() {
+        if (!m_sessionActive) return;
+        
+        // Finalize current focus event if active
+        json tempFocusEvent = m_currentFocusEvent;
+        bool hadActiveFocusEvent = m_hasActiveFocusEvent;
+        
+        if (m_hasActiveFocusEvent) {
+            m_currentSession["window_focus"].push_back(m_currentFocusEvent);
+            m_hasActiveFocusEvent = false;
+        }
+        
+        // Update end timestamp to current time
+        long long currentTime = bigbrother::GetUnixTimestamp();
+        m_currentSession["end_timestamp"] = currentTime;
+        
+        // Load existing sessions from file
+        json allSessions;
+        std::ifstream inFile(m_dataFilePath);
+        if (inFile.is_open()) {
+            inFile.seekg(0, std::ios::end);
+            std::streampos fileSize = inFile.tellg();
+            inFile.seekg(0, std::ios::beg);
+            
+            if (fileSize > 0) {
+                try {
+                    inFile >> allSessions;
+                } catch (const json::exception& e) {
+                    allSessions = json::object();
+                    allSessions["sessions"] = json::array();
+                }
+            } else {
+                allSessions = json::object();
+                allSessions["sessions"] = json::array();
+            }
+            inFile.close();
+        } else {
+            allSessions = json::object();
+            allSessions["sessions"] = json::array();
+        }
+        
+        // Check if we already have a session with our start timestamp (incremental update)
+        bool sessionExists = false;
+        for (size_t i = 0; i < allSessions["sessions"].size(); ++i) {
+            if (allSessions["sessions"][i]["start_timestamp"] == m_sessionStart) {
+                // Update existing session
+                allSessions["sessions"][i] = m_currentSession;
+                sessionExists = true;
+                break;
+            }
+        }
+        
+        if (!sessionExists) {
+            // Add new session
+            allSessions["sessions"].push_back(m_currentSession);
+        }
+        
+        // Write to file
+        std::ofstream outFile(m_dataFilePath);
+        if (outFile.is_open()) {
+            outFile << allSessions.dump(2) << std::endl;
+            outFile.close();
+        }
+        
+        // Restore the focus event so we can continue adding to it
+        if (hadActiveFocusEvent) {
+            m_currentFocusEvent = tempFocusEvent;
+            m_hasActiveFocusEvent = true;
+        }
+        
+        // Reset flush counter and timer
+        m_eventsSinceLastFlush = 0;
+        m_lastFlushTime = std::chrono::steady_clock::now();
+    }
+    
+    bool ShouldFlush() {
+        if (m_eventsSinceLastFlush >= FLUSH_EVENT_THRESHOLD) {
+            return true;
+        }
+        
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_lastFlushTime);
+        if (elapsed.count() >= FLUSH_TIME_THRESHOLD_SECONDS) {
+            return true;
+        }
+        
+        return false;
     }
 
     void LogFocusChange(const std::string& windowTitle, const std::string& processName, const std::string& processPath) {
@@ -133,8 +255,14 @@ private:
         m_currentFocusEvent["title_changes"] = json::array();
         
         m_hasActiveFocusEvent = true;
+        m_eventsSinceLastFlush++;
         
         LogTitleChange(windowTitle);
+        
+        // Check if we should flush to disk
+        if (ShouldFlush()) {
+            FlushCurrentSession();
+        }
     }
 
     void LogTitleChange(const std::string& windowTitle) {
@@ -147,6 +275,12 @@ private:
         titleChange["window_title"] = windowTitle;
         
         m_currentFocusEvent["title_changes"].push_back(titleChange);
+        m_eventsSinceLastFlush++;
+        
+        // Check if we should flush to disk
+        if (ShouldFlush()) {
+            FlushCurrentSession();
+        }
     }
 
     static void CALLBACK WinEventProc(
@@ -223,6 +357,10 @@ public:
         
         m_hasActiveFocusEvent = false;
         
+        // Initialize flush tracking
+        m_eventsSinceLastFlush = 0;
+        m_lastFlushTime = std::chrono::steady_clock::now();
+        
         // Set up hooks
         m_hFocusHook = SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND,
@@ -266,12 +404,59 @@ public:
         
         if (m_hasActiveFocusEvent) {
             m_currentSession["window_focus"].push_back(m_currentFocusEvent);
+            m_hasActiveFocusEvent = false;
         }
         
         m_currentSession["end_timestamp"] = sessionEnd;
-        m_sessionsData["sessions"].push_back(m_currentSession);
         
-        SaveSessionsToFile();
+        // Do a final flush - this will update the session if it already exists
+        // Load existing sessions from file
+        json allSessions;
+        std::ifstream inFile(m_dataFilePath);
+        if (inFile.is_open()) {
+            inFile.seekg(0, std::ios::end);
+            std::streampos fileSize = inFile.tellg();
+            inFile.seekg(0, std::ios::beg);
+            
+            if (fileSize > 0) {
+                try {
+                    inFile >> allSessions;
+                } catch (const json::exception& e) {
+                    allSessions = json::object();
+                    allSessions["sessions"] = json::array();
+                }
+            } else {
+                allSessions = json::object();
+                allSessions["sessions"] = json::array();
+            }
+            inFile.close();
+        } else {
+            allSessions = json::object();
+            allSessions["sessions"] = json::array();
+        }
+        
+        // Check if we already have a session with our start timestamp
+        bool sessionExists = false;
+        for (size_t i = 0; i < allSessions["sessions"].size(); ++i) {
+            if (allSessions["sessions"][i]["start_timestamp"] == m_sessionStart) {
+                // Update existing session
+                allSessions["sessions"][i] = m_currentSession;
+                sessionExists = true;
+                break;
+            }
+        }
+        
+        if (!sessionExists) {
+            // Add new session
+            allSessions["sessions"].push_back(m_currentSession);
+        }
+        
+        // Write to file
+        std::ofstream outFile(m_dataFilePath);
+        if (outFile.is_open()) {
+            outFile << allSessions.dump(2) << std::endl;
+            outFile.close();
+        }
     }
 
     bool IsSessionActive() const {
