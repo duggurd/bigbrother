@@ -21,27 +21,40 @@ ID3D11ShaderResourceView* IconManager::GetIcon(const std::string& exePath) {
         return it->second;
     }
     
-    // Extract icon from executable
-    HICON hIcon = nullptr;
-    
-    // Try to get the icon using SHGetFileInfo first (faster)
-    SHFILEINFOA sfi = {};
-    if (SHGetFileInfoA(exePath.c_str(), 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON)) {
-        hIcon = sfi.hIcon;
-    }
-    
-    // If that didn't work, try ExtractIcon
-    if (!hIcon) {
-        hIcon = ExtractIconA(GetModuleHandle(NULL), exePath.c_str(), 0);
-        if (hIcon == (HICON)1 || !hIcon) { // ExtractIcon returns 1 if no icon
-            hIcon = nullptr;
-        }
+    // Limit cache size to prevent memory issues
+    const size_t maxCacheSize = 200;
+    if (m_iconCache.size() >= maxCacheSize) {
+        // Cache is full, return null (or could implement LRU eviction)
+        return nullptr;
     }
     
     ID3D11ShaderResourceView* texture = nullptr;
-    if (hIcon) {
-        texture = CreateTextureFromIcon(hIcon);
-        DestroyIcon(hIcon);
+    
+    try {
+        // Extract icon from executable
+        HICON hIcon = nullptr;
+        
+        // Try to get the icon using SHGetFileInfo first (faster)
+        SHFILEINFOA sfi = {};
+        if (SHGetFileInfoA(exePath.c_str(), 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON)) {
+            hIcon = sfi.hIcon;
+        }
+        
+        // If that didn't work, try ExtractIcon
+        if (!hIcon) {
+            hIcon = ExtractIconA(GetModuleHandle(NULL), exePath.c_str(), 0);
+            if (hIcon == (HICON)1 || !hIcon) { // ExtractIcon returns 1 if no icon
+                hIcon = nullptr;
+            }
+        }
+        
+        if (hIcon) {
+            texture = CreateTextureFromIcon(hIcon);
+            DestroyIcon(hIcon);
+        }
+    } catch (...) {
+        // Silently fail on icon extraction errors
+        texture = nullptr;
     }
     
     // Cache the result (even if null, to avoid repeated failures)

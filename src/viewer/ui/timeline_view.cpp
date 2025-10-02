@@ -24,7 +24,18 @@ void TimelineView::Render(const std::vector<Session>& sessions) {
     {
         std::string lastDate = "";
         
-        for (int sessionIdx = 0; sessionIdx < sessions.size(); sessionIdx++)
+        // Safety limit: prevent crashes from rendering too many sessions
+        const size_t maxSessions = 1000;
+        size_t sessionsToRender = (sessions.size() > maxSessions) ? maxSessions : sessions.size();
+        
+        if (sessions.size() > maxSessions) {
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), 
+                "Warning: Only showing first %zu of %zu sessions for performance", 
+                maxSessions, sessions.size());
+            ImGui::Separator();
+        }
+        
+        for (int sessionIdx = 0; sessionIdx < sessionsToRender; sessionIdx++)
         {
             const auto& session = sessions[sessionIdx];
             
@@ -59,7 +70,19 @@ void TimelineView::Render(const std::vector<Session>& sessions) {
     
     // Overall statistics bar at bottom
     ImGui::Separator();
-    ImGui::Text("Total Sessions: %d", (int)sessions.size());
+    
+    // Count total events
+    size_t totalEvents = 0;
+    size_t totalTitleChanges = 0;
+    for (const auto& session : sessions) {
+        totalEvents += session.window_focus.size();
+        for (const auto& event : session.window_focus) {
+            totalTitleChanges += event.title_changes.size();
+        }
+    }
+    
+    ImGui::Text("Total: %zu sessions | %zu focus events | %zu title changes", 
+                sessions.size(), totalEvents, totalTitleChanges);
 }
 
 void TimelineView::RenderSession(const Session& session, int sessionIndex) {
@@ -100,6 +123,9 @@ void TimelineView::RenderSession(const Session& session, int sessionIndex) {
     if (session_open)
     {
         // Display focus events for this session
+        const size_t maxEventsPerSession = 500;
+        size_t eventsRendered = 0;
+        
         for (int eventIdx = 0; eventIdx < session.window_focus.size(); eventIdx++)
         {
             const auto& event = session.window_focus[eventIdx];
@@ -109,7 +135,16 @@ void TimelineView::RenderSession(const Session& session, int sessionIndex) {
                 continue; // Skip this event
             }
             
+            // Safety limit per session
+            if (eventsRendered >= maxEventsPerSession) {
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), 
+                    "... %zu more events (hidden for performance)", 
+                    session.window_focus.size() - eventIdx);
+                break;
+            }
+            
             RenderFocusEvent(event, session, eventIdx);
+            eventsRendered++;
         }
         
         ImGui::TreePop();

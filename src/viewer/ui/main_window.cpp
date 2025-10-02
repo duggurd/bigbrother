@@ -52,7 +52,13 @@ void MainWindow::Render() {
 }
 
 void MainWindow::ReloadSessions() {
-    m_sessions = m_sessionLoader.LoadFromFile(m_dataFilePath);
+    try {
+        m_sessions = m_sessionLoader.LoadFromFile(m_dataFilePath);
+    } catch (const std::exception& e) {
+        // If loading fails, clear sessions to prevent crashes
+        m_sessions.clear();
+        // TODO: Show error message to user
+    }
 }
 
 void MainWindow::RenderMenuBar() {
