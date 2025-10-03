@@ -6,6 +6,7 @@
 #include <fstream>
 #include <chrono>
 #include <shlobj.h>
+#include <map>
 #include "json.hpp"
 #include "time_utils.h"
 
@@ -23,10 +24,27 @@ private:
     std::string m_lastFocusedWindowTitle = "";
     HWND m_lastFocusedWindow = NULL;
     
-    json m_sessionsData;
-    json m_currentSession;
-    json m_currentFocusEvent;
-    bool m_hasActiveFocusEvent = false;
+    // Current tracking
+    std::string m_currentProcessName;
+    std::string m_currentProcessPath;
+    std::string m_currentWindowTitle;
+    long long m_currentFocusStartTime = 0;
+    
+    // Aggregated session data
+    struct TabData {
+        long long total_time_ms = 0;
+    };
+    
+    struct ApplicationData {
+        std::string process_name;
+        std::string process_path;
+        long long first_focus_time = 0;
+        long long last_focus_time = 0;
+        long long total_time_ms = 0;
+        std::map<std::string, TabData> tabs;  // window_title -> TabData
+    };
+    
+    std::map<std::string, ApplicationData> m_applications;  // process_name -> ApplicationData
     
     // Incremental write support
     int m_eventsSinceLastFlush = 0;
@@ -77,7 +95,6 @@ private:
         return "Unknown Process (PID: " + std::to_string(processId) + ")";
     }
 
-
     std::string GetUserDataPath() const {
         char path[MAX_PATH];
         if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, path))) {
@@ -88,83 +105,76 @@ private:
         return "focus_log.json";
     }
 
-    void LoadExistingSessions() {
-        // Don't load all sessions into memory - just check if file exists
-        // We'll append our session when saving
-        std::ifstream inFile(m_dataFilePath);
-        if (inFile.is_open()) {
-            inFile.seekg(0, std::ios::end);
-            std::streampos fileSize = inFile.tellg();
-            inFile.close();
-            
-            if (fileSize == 0) {
-                // File is empty, initialize structure
-                m_sessionsData = json::object();
-                m_sessionsData["sessions"] = json::array();
-            } else {
-                // File exists and has content, we'll load it only when needed for flushing
-                m_sessionsData = json::object();
-                m_sessionsData["sessions"] = json::array();
-            }
-        } else {
-            // File doesn't exist, initialize structure
-            m_sessionsData = json::object();
-            m_sessionsData["sessions"] = json::array();
+    void FinalizeCurrentFocus() {
+        if (m_currentFocusStartTime == 0 || m_currentProcessName.empty()) {
+            return;  // Nothing to finalize
         }
+        
+        long long currentTime = bigbrother::GetUnixTimestamp();
+        long long timeSpentMs = (currentTime - m_currentFocusStartTime) * 1000;  // Convert seconds to milliseconds
+        
+        // Get or create application entry
+        ApplicationData& appData = m_applications[m_currentProcessName];
+        if (appData.process_name.empty()) {
+            // New application
+            appData.process_name = m_currentProcessName;
+            appData.process_path = m_currentProcessPath;
+            appData.first_focus_time = m_currentFocusStartTime;
+        }
+        
+        // Update application data
+        appData.last_focus_time = currentTime;
+        appData.total_time_ms += timeSpentMs;
+        
+        // Update tab data
+        TabData& tabData = appData.tabs[m_currentWindowTitle];
+        tabData.total_time_ms += timeSpentMs;
+        
+        m_eventsSinceLastFlush++;
     }
-
-    void SaveSessionsToFile() {
-        // Load existing sessions from file
-        json allSessions;
-        std::ifstream inFile(m_dataFilePath);
-        if (inFile.is_open()) {
-            inFile.seekg(0, std::ios::end);
-            std::streampos fileSize = inFile.tellg();
-            inFile.seekg(0, std::ios::beg);
+    
+    json BuildSessionJSON() {
+        json sessionJson = json::object();
+        sessionJson["start_timestamp"] = m_sessionStart;
+        sessionJson["end_timestamp"] = bigbrother::GetUnixTimestamp();
+        sessionJson["comment"] = "";  // Can be set later
+        sessionJson["applications"] = json::array();
+        
+        for (const auto& [processName, appData] : m_applications) {
+            json appJson = json::object();
+            appJson["process_name"] = appData.process_name;
+            appJson["process_path"] = appData.process_path;
+            appJson["first_focus_time"] = appData.first_focus_time;
+            appJson["last_focus_time"] = appData.last_focus_time;
+            appJson["total_time_spent_ms"] = appData.total_time_ms;
+            appJson["tabs"] = json::array();
             
-            if (fileSize > 0) {
-                try {
-                    inFile >> allSessions;
-                } catch (const json::exception& e) {
-                    allSessions = json::object();
-                    allSessions["sessions"] = json::array();
-                }
-            } else {
-                allSessions = json::object();
-                allSessions["sessions"] = json::array();
+            for (const auto& [windowTitle, tabData] : appData.tabs) {
+                json tabJson = json::object();
+                tabJson["window_title"] = windowTitle;
+                tabJson["total_time_spent_ms"] = tabData.total_time_ms;
+                appJson["tabs"].push_back(tabJson);
             }
-            inFile.close();
-        } else {
-            allSessions = json::object();
-            allSessions["sessions"] = json::array();
+            
+            sessionJson["applications"].push_back(appJson);
         }
         
-        // Append our current session
-        allSessions["sessions"].push_back(m_currentSession);
-        
-        // Write to file
-        std::ofstream outFile(m_dataFilePath);
-        if (outFile.is_open()) {
-            outFile << allSessions.dump(2) << std::endl;
-            outFile.close();
-        }
+        return sessionJson;
     }
     
     void FlushCurrentSession() {
         if (!m_sessionActive) return;
         
-        // Finalize current focus event if active
-        json tempFocusEvent = m_currentFocusEvent;
-        bool hadActiveFocusEvent = m_hasActiveFocusEvent;
+        // Finalize current focus before flushing
+        long long tempFocusStartTime = m_currentFocusStartTime;
+        std::string tempProcessName = m_currentProcessName;
+        std::string tempProcessPath = m_currentProcessPath;
+        std::string tempWindowTitle = m_currentWindowTitle;
         
-        if (m_hasActiveFocusEvent) {
-            m_currentSession["window_focus"].push_back(m_currentFocusEvent);
-            m_hasActiveFocusEvent = false;
-        }
+        FinalizeCurrentFocus();
         
-        // Update end timestamp to current time
-        long long currentTime = bigbrother::GetUnixTimestamp();
-        m_currentSession["end_timestamp"] = currentTime;
+        // Build session JSON
+        json sessionJson = BuildSessionJSON();
         
         // Load existing sessions from file
         json allSessions;
@@ -196,7 +206,7 @@ private:
         for (size_t i = 0; i < allSessions["sessions"].size(); ++i) {
             if (allSessions["sessions"][i]["start_timestamp"] == m_sessionStart) {
                 // Update existing session
-                allSessions["sessions"][i] = m_currentSession;
+                allSessions["sessions"][i] = sessionJson;
                 sessionExists = true;
                 break;
             }
@@ -204,7 +214,7 @@ private:
         
         if (!sessionExists) {
             // Add new session
-            allSessions["sessions"].push_back(m_currentSession);
+            allSessions["sessions"].push_back(sessionJson);
         }
         
         // Write to file
@@ -214,11 +224,11 @@ private:
             outFile.close();
         }
         
-        // Restore the focus event so we can continue adding to it
-        if (hadActiveFocusEvent) {
-            m_currentFocusEvent = tempFocusEvent;
-            m_hasActiveFocusEvent = true;
-        }
+        // Restore current focus tracking to continue
+        m_currentFocusStartTime = bigbrother::GetUnixTimestamp();
+        m_currentProcessName = tempProcessName;
+        m_currentProcessPath = tempProcessPath;
+        m_currentWindowTitle = tempWindowTitle;
         
         // Reset flush counter and timer
         m_eventsSinceLastFlush = 0;
@@ -242,22 +252,14 @@ private:
     void LogFocusChange(const std::string& windowTitle, const std::string& processName, const std::string& processPath) {
         if (!m_sessionActive) return;
         
-        long long timestamp = bigbrother::GetUnixTimestamp();
+        // Finalize previous focus
+        FinalizeCurrentFocus();
         
-        if (m_hasActiveFocusEvent) {
-            m_currentSession["window_focus"].push_back(m_currentFocusEvent);
-        }
-        
-        m_currentFocusEvent = json::object();
-        m_currentFocusEvent["focus_timestamp"] = timestamp;
-        m_currentFocusEvent["process_name"] = processName;
-        m_currentFocusEvent["process_path"] = processPath;
-        m_currentFocusEvent["title_changes"] = json::array();
-        
-        m_hasActiveFocusEvent = true;
-        m_eventsSinceLastFlush++;
-        
-        LogTitleChange(windowTitle);
+        // Start new focus
+        m_currentProcessName = processName;
+        m_currentProcessPath = processPath;
+        m_currentWindowTitle = windowTitle;
+        m_currentFocusStartTime = bigbrother::GetUnixTimestamp();
         
         // Check if we should flush to disk
         if (ShouldFlush()) {
@@ -266,16 +268,17 @@ private:
     }
 
     void LogTitleChange(const std::string& windowTitle) {
-        if (!m_sessionActive || !m_hasActiveFocusEvent) return;
+        if (!m_sessionActive || m_currentProcessName.empty()) return;
         
-        long long timestamp = bigbrother::GetUnixTimestamp();
+        // Only log if title actually changed
+        if (windowTitle == m_currentWindowTitle) return;
         
-        json titleChange = json::object();
-        titleChange["title_timestamp"] = timestamp;
-        titleChange["window_title"] = windowTitle;
+        // Finalize current tab time
+        FinalizeCurrentFocus();
         
-        m_currentFocusEvent["title_changes"].push_back(titleChange);
-        m_eventsSinceLastFlush++;
+        // Start tracking new tab in same application
+        m_currentWindowTitle = windowTitle;
+        m_currentFocusStartTime = bigbrother::GetUnixTimestamp();
         
         // Check if we should flush to disk
         if (ShouldFlush()) {
@@ -347,15 +350,13 @@ public:
         m_sessionActive = true;
         
         m_dataFilePath = GetUserDataPath();
-        LoadExistingSessions();
         
-        m_currentSession = json::object();
-        m_currentSession["start_timestamp"] = m_sessionStart;
-        m_currentSession["end_timestamp"] = nullptr;
-        m_currentSession["comment"] = comment;
-        m_currentSession["window_focus"] = json::array();
-        
-        m_hasActiveFocusEvent = false;
+        // Initialize tracking variables
+        m_applications.clear();
+        m_currentProcessName.clear();
+        m_currentProcessPath.clear();
+        m_currentWindowTitle.clear();
+        m_currentFocusStartTime = 0;
         
         // Initialize flush tracking
         m_eventsSinceLastFlush = 0;
@@ -398,18 +399,14 @@ public:
             m_hTitleHook = NULL;
         }
         
-        // Now safe to finalize session data
-        long long sessionEnd = bigbrother::GetUnixTimestamp();
         m_sessionActive = false;
         
-        if (m_hasActiveFocusEvent) {
-            m_currentSession["window_focus"].push_back(m_currentFocusEvent);
-            m_hasActiveFocusEvent = false;
-        }
+        // Finalize current focus
+        FinalizeCurrentFocus();
         
-        m_currentSession["end_timestamp"] = sessionEnd;
+        // Build final session JSON
+        json sessionJson = BuildSessionJSON();
         
-        // Do a final flush - this will update the session if it already exists
         // Load existing sessions from file
         json allSessions;
         std::ifstream inFile(m_dataFilePath);
@@ -440,7 +437,7 @@ public:
         for (size_t i = 0; i < allSessions["sessions"].size(); ++i) {
             if (allSessions["sessions"][i]["start_timestamp"] == m_sessionStart) {
                 // Update existing session
-                allSessions["sessions"][i] = m_currentSession;
+                allSessions["sessions"][i] = sessionJson;
                 sessionExists = true;
                 break;
             }
@@ -448,7 +445,7 @@ public:
         
         if (!sessionExists) {
             // Add new session
-            allSessions["sessions"].push_back(m_currentSession);
+            allSessions["sessions"].push_back(sessionJson);
         }
         
         // Write to file

@@ -54,43 +54,33 @@ Session SessionLoader::ParseSession(const json& sessionJson) {
     session.end_timestamp = sessionJson.value("end_timestamp", 0LL);
     session.comment = sessionJson.value("comment", "");
     
-    if (sessionJson.contains("window_focus") && sessionJson["window_focus"].is_array()) {
-        for (const auto& focusJson : sessionJson["window_focus"]) {
-            session.window_focus.push_back(ParseFocusEvent(focusJson));
+    if (sessionJson.contains("applications") && sessionJson["applications"].is_array()) {
+        for (const auto& appJson : sessionJson["applications"]) {
+            session.applications.push_back(ParseApplicationEvent(appJson));
         }
     }
     
     return session;
 }
 
-WindowFocusEvent SessionLoader::ParseFocusEvent(const json& eventJson) {
-    WindowFocusEvent event;
-    event.focus_timestamp = eventJson.value("focus_timestamp", 0LL);
-    event.process_name = eventJson.value("process_name", "");
-    event.process_path = eventJson.value("process_path", "");
+ApplicationFocusEvent SessionLoader::ParseApplicationEvent(const json& appJson) {
+    ApplicationFocusEvent app;
+    app.process_name = appJson.value("process_name", "");
+    app.process_path = appJson.value("process_path", "");
+    app.first_focus_time = appJson.value("first_focus_time", 0LL);
+    app.last_focus_time = appJson.value("last_focus_time", 0LL);
+    app.total_time_spent_ms = appJson.value("total_time_spent_ms", 0LL);
     
-    if (eventJson.contains("title_changes") && eventJson["title_changes"].is_array()) {
-        for (const auto& titleJson : eventJson["title_changes"]) {
-            TitleChange tc;
-            tc.timestamp = titleJson.value("title_timestamp", 0LL);
-            tc.title = titleJson.value("window_title", "");
-            event.title_changes.push_back(tc);
+    if (appJson.contains("tabs") && appJson["tabs"].is_array()) {
+        for (const auto& tabJson : appJson["tabs"]) {
+            TabInfo tab;
+            tab.window_title = tabJson.value("window_title", "");
+            tab.total_time_spent_ms = tabJson.value("total_time_spent_ms", 0LL);
+            app.tabs.push_back(tab);
         }
     }
     
-    // Backward compatibility: if old data has window_title in focus event,
-    // move it to the first title change
-    if (eventJson.contains("window_title") && !eventJson["window_title"].is_null()) {
-        std::string old_title = eventJson.value("window_title", "");
-        if (!old_title.empty() && event.title_changes.empty()) {
-            TitleChange tc;
-            tc.timestamp = event.focus_timestamp;
-            tc.title = old_title;
-            event.title_changes.insert(event.title_changes.begin(), tc);
-        }
-    }
-    
-    return event;
+    return app;
 }
 
 bool SessionLoader::SaveToFile(const std::string& filePath, const std::vector<Session>& sessions) {
@@ -104,25 +94,27 @@ bool SessionLoader::SaveToFile(const std::string& filePath, const std::vector<Se
             sessionJson["start_timestamp"] = session.start_timestamp;
             sessionJson["end_timestamp"] = session.end_timestamp;
             sessionJson["comment"] = session.comment;
-            sessionJson["window_focus"] = json::array();
+            sessionJson["applications"] = json::array();
             
-            // Convert focus events
-            for (const auto& event : session.window_focus) {
-                json eventJson;
-                eventJson["focus_timestamp"] = event.focus_timestamp;
-                eventJson["process_name"] = event.process_name;
-                eventJson["process_path"] = event.process_path;
-                eventJson["title_changes"] = json::array();
+            // Convert application events
+            for (const auto& app : session.applications) {
+                json appJson;
+                appJson["process_name"] = app.process_name;
+                appJson["process_path"] = app.process_path;
+                appJson["first_focus_time"] = app.first_focus_time;
+                appJson["last_focus_time"] = app.last_focus_time;
+                appJson["total_time_spent_ms"] = app.total_time_spent_ms;
+                appJson["tabs"] = json::array();
                 
-                // Convert title changes
-                for (const auto& tc : event.title_changes) {
-                    json tcJson;
-                    tcJson["title_timestamp"] = tc.timestamp;
-                    tcJson["window_title"] = tc.title;
-                    eventJson["title_changes"].push_back(tcJson);
+                // Convert tabs
+                for (const auto& tab : app.tabs) {
+                    json tabJson;
+                    tabJson["window_title"] = tab.window_title;
+                    tabJson["total_time_spent_ms"] = tab.total_time_spent_ms;
+                    appJson["tabs"].push_back(tabJson);
                 }
                 
-                sessionJson["window_focus"].push_back(eventJson);
+                sessionJson["applications"].push_back(appJson);
             }
             
             data["sessions"].push_back(sessionJson);

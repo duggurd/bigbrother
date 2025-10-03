@@ -71,18 +71,18 @@ void TimelineView::Render(const std::vector<Session>& sessions) {
     // Overall statistics bar at bottom
     ImGui::Separator();
     
-    // Count total events
-    size_t totalEvents = 0;
-    size_t totalTitleChanges = 0;
+    // Count total applications and tabs
+    size_t totalApps = 0;
+    size_t totalTabs = 0;
     for (const auto& session : sessions) {
-        totalEvents += session.window_focus.size();
-        for (const auto& event : session.window_focus) {
-            totalTitleChanges += event.title_changes.size();
+        totalApps += session.applications.size();
+        for (const auto& app : session.applications) {
+            totalTabs += app.tabs.size();
         }
     }
     
-    ImGui::Text("Total: %zu sessions | %zu focus events | %zu title changes", 
-                sessions.size(), totalEvents, totalTitleChanges);
+    ImGui::Text("Total: %zu sessions | %zu applications | %zu tabs", 
+                sessions.size(), totalApps, totalTabs);
 }
 
 void TimelineView::RenderSession(const Session& session, int sessionIndex) {
@@ -122,29 +122,29 @@ void TimelineView::RenderSession(const Session& session, int sessionIndex) {
     
     if (session_open)
     {
-        // Display focus events for this session
-        const size_t maxEventsPerSession = 500;
-        size_t eventsRendered = 0;
+        // Display applications for this session
+        const size_t maxAppsPerSession = 500;
+        size_t appsRendered = 0;
         
-        for (int eventIdx = 0; eventIdx < session.window_focus.size(); eventIdx++)
+        for (int appIdx = 0; appIdx < session.applications.size(); appIdx++)
         {
-            const auto& event = session.window_focus[eventIdx];
+            const auto& app = session.applications[appIdx];
             
             // Apply program filters
-            if (m_filterManager.IsFiltered(event.process_name)) {
-                continue; // Skip this event
+            if (m_filterManager.IsFiltered(app.process_name)) {
+                continue; // Skip this app
             }
             
             // Safety limit per session
-            if (eventsRendered >= maxEventsPerSession) {
+            if (appsRendered >= maxAppsPerSession) {
                 ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), 
-                    "... %zu more events (hidden for performance)", 
-                    session.window_focus.size() - eventIdx);
+                    "... %zu more applications (hidden for performance)", 
+                    session.applications.size() - appIdx);
                 break;
             }
             
-            RenderFocusEvent(event, session, eventIdx);
-            eventsRendered++;
+            RenderApplication(app, appIdx);
+            appsRendered++;
         }
         
         ImGui::TreePop();
@@ -153,35 +153,36 @@ void TimelineView::RenderSession(const Session& session, int sessionIndex) {
     ImGui::PopID();
 }
 
-void TimelineView::RenderFocusEvent(const WindowFocusEvent& event, const Session& session, int eventIndex) {
-    ImGui::PushID(eventIndex);
+void TimelineView::RenderApplication(const ApplicationFocusEvent& app, int appIndex) {
+    ImGui::PushID(appIndex);
     
-    // Calculate event duration
-    long long event_duration = CalculateEventDuration(session, eventIndex);
+    // Application header with icon and total time
+    std::string first_focus_time = FormatTime(app.first_focus_time);
+    std::string last_focus_time = FormatTime(app.last_focus_time);
+    std::string total_time = FormatDurationMs(app.total_time_spent_ms);
     
-    // Event header with icon
-    std::string time_str = FormatTime(event.focus_timestamp);
-    std::string event_header = time_str + " - " + event.process_name + " (" + FormatDuration(event_duration) + ")";
+    std::string app_header = app.process_name + " - " + total_time + 
+                           " (" + first_focus_time + " to " + last_focus_time + ")";
     
     // Get and display application icon
-    ID3D11ShaderResourceView* icon = m_iconManager.GetIcon(event.process_path);
+    ID3D11ShaderResourceView* icon = m_iconManager.GetIcon(app.process_path);
     if (icon) {
         ImGui::Image((void*)icon, ImVec2(16, 16));
         ImGui::SameLine();
     }
     
-    // Event tree node with yellow color
+    // Application tree node with yellow color
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.6f, 1.0f)); // Light yellow
-    bool event_open = ImGui::TreeNode(event_header.c_str());
+    bool app_open = ImGui::TreeNode(app_header.c_str());
     ImGui::PopStyleColor();
     
     // Right-click context menu
     if (ImGui::BeginPopupContextItem())
     {
-        std::string menu_text = "Add '" + event.process_name + "' to filters";
+        std::string menu_text = "Add '" + app.process_name + "' to filters";
         if (ImGui::MenuItem(menu_text.c_str()))
         {
-            if (m_filterManager.AddFilter(event.process_name, true))
+            if (m_filterManager.AddFilter(app.process_name, true))
             {
                 m_filterManager.SaveSettings();
             }
@@ -189,11 +190,11 @@ void TimelineView::RenderFocusEvent(const WindowFocusEvent& event, const Session
         ImGui::EndPopup();
     }
     
-    if (event_open)
+    if (app_open)
     {
-        ImGui::Text("Path: %s", event.process_path.c_str());
+        ImGui::Text("Path: %s", app.process_path.c_str());
         
-        RenderTitleChanges(event.title_changes, event, session, eventIndex);
+        RenderTabs(app.tabs);
         
         ImGui::TreePop();
     }
@@ -201,73 +202,45 @@ void TimelineView::RenderFocusEvent(const WindowFocusEvent& event, const Session
     ImGui::PopID();
 }
 
-void TimelineView::RenderTitleChanges(const std::vector<TitleChange>& titleChanges, 
-                                      const WindowFocusEvent& event,
-                                      const Session& session,
-                                      int eventIndex) {
-    if (titleChanges.empty()) {
-        ImGui::Text("No title changes recorded");
+void TimelineView::RenderTabs(const std::vector<TabInfo>& tabs) {
+    if (tabs.empty()) {
+        ImGui::Text("No tabs recorded");
         return;
     }
     
     ImGui::Spacing();
     
-    // Calculate time spent on each unique title
-    std::map<std::string, long long> titleDurations;
+    // Sort tabs by time spent (longest first)
+    std::vector<TabInfo> sortedTabs = tabs;
+    std::sort(sortedTabs.begin(), sortedTabs.end(), 
+        [](const TabInfo& a, const TabInfo& b) { 
+            return a.total_time_spent_ms > b.total_time_spent_ms; 
+        });
     
-    for (size_t i = 0; i < titleChanges.size(); i++)
-    {
-        const auto& tc = titleChanges[i];
-        long long duration = 0;
-        
-        // Calculate duration until next title change or end of focus event
-        if (i < titleChanges.size() - 1) {
-            duration = titleChanges[i + 1].timestamp - tc.timestamp;
-        } else {
-            // Last title change - duration until next focus event or session end
-            if (eventIndex < session.window_focus.size() - 1) {
-                duration = session.window_focus[eventIndex + 1].focus_timestamp - tc.timestamp;
-            } else {
-                duration = session.end_timestamp - tc.timestamp;
-            }
-        }
-        
-        // Aggregate durations for same title
-        titleDurations[tc.title] += duration;
-    }
-    
-    // Convert to vector for sorting
-    std::vector<std::pair<std::string, long long>> sortedTitles(titleDurations.begin(), titleDurations.end());
-    
-    // Sort by duration (longest first)
-    std::sort(sortedTitles.begin(), sortedTitles.end(), 
-        [](const auto& a, const auto& b) { return a.second > b.second; });
-    
-    ImGui::Text("Time per Title:");
+    ImGui::Text("Time per Tab:");
     ImGui::Indent();
     
-    for (const auto& pair : sortedTitles)
+    for (const auto& tab : sortedTabs)
     {
         // Format duration with fixed width for alignment
-        std::string duration = FormatDuration(pair.second);
-        // Pad duration to 5 characters for alignment
-        while (duration.length() < 5) {
+        std::string duration = FormatDurationMs(tab.total_time_spent_ms);
+        // Pad duration to 8 characters for alignment
+        while (duration.length() < 8) {
             duration = " " + duration;
         }
         
-        std::string display = duration + " | " + pair.first;
+        std::string display = duration + " | " + tab.window_title;
         ImGui::Text("%s", display.c_str());
     }
     ImGui::Unindent();
 }
 
-long long TimelineView::CalculateEventDuration(const Session& session, int eventIndex) const {
-    if (eventIndex < session.window_focus.size() - 1) {
-        return session.window_focus[eventIndex + 1].focus_timestamp - 
-               session.window_focus[eventIndex].focus_timestamp;
-    } else {
-        return session.end_timestamp - session.window_focus[eventIndex].focus_timestamp;
-    }
+std::string TimelineView::FormatDurationMs(long long durationMs) const {
+    // Convert milliseconds to seconds
+    long long durationSec = durationMs / 1000;
+    
+    // Use the existing FormatDuration function which expects seconds
+    return FormatDuration(durationSec);
 }
 
 } // namespace viewer

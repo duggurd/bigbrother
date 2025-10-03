@@ -49,8 +49,8 @@ private:
     // Helper to parse a single session from JSON
     Session ParseSession(const nlohmann::json& sessionJson);
     
-    // Helper to parse a window focus event
-    WindowFocusEvent ParseFocusEvent(const nlohmann::json& eventJson);
+    // Helper to parse an application focus event
+    ApplicationFocusEvent ParseApplicationEvent(const nlohmann::json& appJson);
 };
 
 } // namespace viewer

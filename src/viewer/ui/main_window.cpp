@@ -142,7 +142,7 @@ void MainWindow::RenderDeleteConfirmation() {
         ImGui::Text("Delete Session %d?", m_deleteSessionIndex + 1);
         ImGui::Spacing();
         ImGui::Text("Time: %s - %s (%s)", start_time.c_str(), end_time.c_str(), FormatDuration(duration).c_str());
-        ImGui::Text("Focus Events: %d", (int)session.window_focus.size());
+        ImGui::Text("Applications: %d", (int)session.applications.size());
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "This action cannot be undone!");
         ImGui::Spacing();

@@ -12,7 +12,7 @@ namespace viewer {
 /**
  * @brief Timeline view UI component
  * 
- * Renders the session timeline with focus events,
+ * Renders the session timeline with applications and tabs,
  * grouped by date, with icons and filtering.
  */
 class TimelineView {
@@ -42,17 +42,14 @@ private:
     // Render a single session
     void RenderSession(const Session& session, int sessionIndex);
     
-    // Render a focus event within a session
-    void RenderFocusEvent(const WindowFocusEvent& event, const Session& session, int eventIndex);
+    // Render an application within a session
+    void RenderApplication(const ApplicationFocusEvent& app, int appIndex);
     
-    // Render title changes for an event
-    void RenderTitleChanges(const std::vector<TitleChange>& titleChanges, 
-                           const WindowFocusEvent& event,
-                           const Session& session,
-                           int eventIndex);
+    // Render tabs for an application
+    void RenderTabs(const std::vector<TabInfo>& tabs);
     
-    // Calculate duration for an event
-    long long CalculateEventDuration(const Session& session, int eventIndex) const;
+    // Format time duration from milliseconds
+    std::string FormatDurationMs(long long durationMs) const;
 };
 
 } // namespace viewer
