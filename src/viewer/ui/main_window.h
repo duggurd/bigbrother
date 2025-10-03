@@ -1,6 +1,8 @@
 #pragma once
 
+#include <windows.h>
 #include <vector>
+#include <chrono>
 #include "session_data.h"
 #include "session_logger.h"
 #include "ui/settings_window.h"
@@ -58,6 +60,15 @@ private:
     // Start session state
     bool m_showStartSessionDialog = false;
     char m_sessionComment[256] = "";
+    
+    // File watcher state
+    HANDLE m_fileWatcherHandle = INVALID_HANDLE_VALUE;
+    bool m_fileWatcherEnabled = true;
+    bool m_shouldReload = false;
+    
+    void SetupFileWatcher();
+    void CheckFileWatcher();
+    void CleanupFileWatcher();
 
     // UI
     void RenderMenuBar();

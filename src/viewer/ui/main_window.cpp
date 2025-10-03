@@ -14,6 +14,9 @@ MainWindow::MainWindow(ID3D11Device* device)
     m_dataFilePath = m_sessionLoader.GetDefaultDataPath();
     ReloadSessions();
     
+    // Set up file watcher for event-based updates
+    SetupFileWatcher();
+    
     // Set up deletion callback
     m_timelineView.SetDeleteSessionCallback([this](int sessionIndex) {
         RequestDeleteSession(sessionIndex);
@@ -21,9 +24,21 @@ MainWindow::MainWindow(ID3D11Device* device)
 }
 
 MainWindow::~MainWindow() {
+    CleanupFileWatcher();
 }
 
 void MainWindow::Render() {
+    // Check file watcher for changes
+    if (m_fileWatcherEnabled) {
+        CheckFileWatcher();
+        
+        // Reload if file changed
+        if (m_shouldReload) {
+            ReloadSessions();
+            m_shouldReload = false;
+        }
+    }
+    
     // Get IO for window sizing
     ImGuiIO& io = ImGui::GetIO();
     
@@ -70,6 +85,26 @@ void MainWindow::RenderMenuBar() {
         if (ImGui::Button("Reload"))
         {
             ReloadSessions();
+        }
+        
+        ImGui::SameLine();
+        
+        // File watcher toggle
+        if (ImGui::Checkbox("Auto-refresh", &m_fileWatcherEnabled))
+        {
+            if (m_fileWatcherEnabled) {
+                SetupFileWatcher();
+            } else {
+                CleanupFileWatcher();
+            }
+        }
+        
+        // Show status indicator when file watcher is on
+        if (m_fileWatcherEnabled) {
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.2f, 1.0f));
+            ImGui::Text("[Live]");
+            ImGui::PopStyleColor();
         }
         
         ImGui::Spacing();
@@ -225,6 +260,54 @@ void MainWindow::RenderStartSessionDialog() {
         }
         
         ImGui::EndPopup();
+    }
+}
+
+void MainWindow::SetupFileWatcher() {
+    CleanupFileWatcher(); // Clean up any existing watcher
+    
+    // Extract directory path from file path
+    size_t lastSlash = m_dataFilePath.find_last_of("\\/");
+    if (lastSlash == std::string::npos) {
+        return; // Invalid path
+    }
+    
+    std::string directoryPath = m_dataFilePath.substr(0, lastSlash);
+    
+    // Set up directory change notification
+    m_fileWatcherHandle = FindFirstChangeNotificationA(
+        directoryPath.c_str(),
+        FALSE,  // Don't watch subtree
+        FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE
+    );
+    
+    if (m_fileWatcherHandle == INVALID_HANDLE_VALUE) {
+        // Failed to create watcher, disable it
+        m_fileWatcherEnabled = false;
+    }
+}
+
+void MainWindow::CheckFileWatcher() {
+    if (m_fileWatcherHandle == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    
+    // Check if notification was signaled (non-blocking)
+    DWORD result = WaitForSingleObject(m_fileWatcherHandle, 0);
+    
+    if (result == WAIT_OBJECT_0) {
+        // Directory changed, mark for reload
+        m_shouldReload = true;
+        
+        // Reset the notification for next change
+        FindNextChangeNotification(m_fileWatcherHandle);
+    }
+}
+
+void MainWindow::CleanupFileWatcher() {
+    if (m_fileWatcherHandle != INVALID_HANDLE_VALUE) {
+        FindCloseChangeNotification(m_fileWatcherHandle);
+        m_fileWatcherHandle = INVALID_HANDLE_VALUE;
     }
 }
 

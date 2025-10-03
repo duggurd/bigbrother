@@ -4,6 +4,7 @@
 #include <string>
 #include <psapi.h>
 #include <fstream>
+#include <iostream>
 #include <chrono>
 #include <shlobj.h>
 #include <map>
@@ -49,7 +50,7 @@ private:
     // Incremental write support
     int m_eventsSinceLastFlush = 0;
     std::chrono::steady_clock::time_point m_lastFlushTime;
-    static const int FLUSH_EVENT_THRESHOLD = 10;  // Flush every 10 events
+    static const int FLUSH_EVENT_THRESHOLD = 1;  // Flush on every event for real-time updates
     static const int FLUSH_TIME_THRESHOLD_SECONDS = 30;  // Flush every 30 seconds
 
     // Static instance pointer for callbacks
@@ -222,6 +223,8 @@ private:
         if (outFile.is_open()) {
             outFile << allSessions.dump(2) << std::endl;
             outFile.close();
+        } else {
+            std::cerr << "[ERROR] Could not open file for writing!" << std::endl;
         }
         
         // Restore current focus tracking to continue
@@ -261,10 +264,8 @@ private:
         m_currentWindowTitle = windowTitle;
         m_currentFocusStartTime = bigbrother::GetUnixTimestamp();
         
-        // Check if we should flush to disk
-        if (ShouldFlush()) {
-            FlushCurrentSession();
-        }
+        // Always flush on every event for real-time updates
+        FlushCurrentSession();
     }
 
     void LogTitleChange(const std::string& windowTitle) {
@@ -280,10 +281,8 @@ private:
         m_currentWindowTitle = windowTitle;
         m_currentFocusStartTime = bigbrother::GetUnixTimestamp();
         
-        // Check if we should flush to disk
-        if (ShouldFlush()) {
-            FlushCurrentSession();
-        }
+        // Always flush on every event for real-time updates
+        FlushCurrentSession();
     }
 
     static void CALLBACK WinEventProc(
@@ -317,6 +316,11 @@ private:
         if (event == EVENT_SYSTEM_FOREGROUND && idObject == OBJID_WINDOW) {
             s_instance->m_lastFocusedWindow = hwnd;
             s_instance->m_lastFocusedWindowTitle = windowTitle;
+            
+            std::cout << "Focus changed to: " << windowTitle << std::endl;
+            std::cout << "  Process: " << processInfo << std::endl;
+            std::cout << "  ---" << std::endl;
+            
             s_instance->LogFocusChange(windowTitle, processName, processPath);
         }
         else if (event == EVENT_OBJECT_NAMECHANGE && idObject == OBJID_WINDOW) {
@@ -324,6 +328,11 @@ private:
                 windowTitle != s_instance->m_lastFocusedWindowTitle && 
                 !windowTitle.empty()) {
                 s_instance->m_lastFocusedWindowTitle = windowTitle;
+                
+                std::cout << "Title changed to: " << windowTitle << std::endl;
+                std::cout << "  Process: " << processInfo << std::endl;
+                std::cout << "  ---" << std::endl;
+                
                 s_instance->LogTitleChange(windowTitle);
             }
         }
