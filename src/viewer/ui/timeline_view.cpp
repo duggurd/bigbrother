@@ -85,8 +85,19 @@ void TimelineView::Render(const std::vector<Session>& sessions) {
                 sessions.size(), totalApps, totalTabs);
 }
 
+std::string TimelineView::GetSessionId(const Session& session, int sessionIndex) const {
+    return "session_" + std::to_string(session.start_timestamp) + "_" + std::to_string(sessionIndex);
+}
+
+std::string TimelineView::GetApplicationId(const Session& session, const ApplicationFocusEvent& app, int appIndex) const {
+    return "app_" + std::to_string(session.start_timestamp) + "_" + app.process_name + "_" + std::to_string(appIndex);
+}
+
 void TimelineView::RenderSession(const Session& session, int sessionIndex) {
     ImGui::PushID(sessionIndex);
+    
+    // Generate stable ID for this session
+    std::string sessionId = GetSessionId(session, sessionIndex);
     
     // Calculate session duration
     long long session_duration = session.end_timestamp - session.start_timestamp;
@@ -103,10 +114,26 @@ void TimelineView::RenderSession(const Session& session, int sessionIndex) {
         session_header += " - " + session.comment;
     }
     
+    // Determine if this session should be open
+    // New sessions default to open, existing sessions use tracked state
+    bool isNew = m_seenSessions.count(sessionId) == 0;
+    bool isClosed = m_closedSessions.count(sessionId) > 0;
+    ImGuiTreeNodeFlags flags = (isNew || !isClosed) ? ImGuiTreeNodeFlags_DefaultOpen : ImGuiTreeNodeFlags_None;
+    
+    // Mark as seen
+    m_seenSessions.insert(sessionId);
+    
     // Session tree node with distinct color
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 1.0f, 0.6f, 1.0f)); // Light green
-    bool session_open = ImGui::TreeNodeEx(session_header.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+    bool session_open = ImGui::TreeNodeEx(session_header.c_str(), flags);
     ImGui::PopStyleColor();
+    
+    // Track state change
+    if (!session_open) {
+        m_closedSessions.insert(sessionId);
+    } else {
+        m_closedSessions.erase(sessionId);
+    }
     
     // Right-click context menu for session
     if (ImGui::BeginPopupContextItem())
@@ -143,7 +170,7 @@ void TimelineView::RenderSession(const Session& session, int sessionIndex) {
                 break;
             }
             
-            RenderApplication(app, appIdx);
+            RenderApplication(session, app, appIdx);
             appsRendered++;
         }
         
@@ -153,8 +180,11 @@ void TimelineView::RenderSession(const Session& session, int sessionIndex) {
     ImGui::PopID();
 }
 
-void TimelineView::RenderApplication(const ApplicationFocusEvent& app, int appIndex) {
+void TimelineView::RenderApplication(const Session& session, const ApplicationFocusEvent& app, int appIndex) {
     ImGui::PushID(appIndex);
+    
+    // Generate stable ID for this application
+    std::string appId = GetApplicationId(session, app, appIndex);
     
     // Application header with icon and total time
     std::string first_focus_time = FormatTime(app.first_focus_time);
@@ -171,10 +201,26 @@ void TimelineView::RenderApplication(const ApplicationFocusEvent& app, int appIn
         ImGui::SameLine();
     }
     
+    // Determine if this application should be open
+    // Applications default to closed, only open if explicitly opened by user
+    bool isNew = m_seenApplications.count(appId) == 0;
+    bool wasOpened = m_openApplications.count(appId) > 0;
+    ImGuiTreeNodeFlags flags = (!isNew && wasOpened) ? ImGuiTreeNodeFlags_DefaultOpen : ImGuiTreeNodeFlags_None;
+    
+    // Mark as seen
+    m_seenApplications.insert(appId);
+    
     // Application tree node with yellow color
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.6f, 1.0f)); // Light yellow
-    bool app_open = ImGui::TreeNode(app_header.c_str());
+    bool app_open = ImGui::TreeNodeEx(app_header.c_str(), flags);
     ImGui::PopStyleColor();
+    
+    // Track state change
+    if (app_open) {
+        m_openApplications.insert(appId);
+    } else {
+        m_openApplications.erase(appId);
+    }
     
     // Right-click context menu
     if (ImGui::BeginPopupContextItem())

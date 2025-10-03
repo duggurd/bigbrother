@@ -2,6 +2,8 @@
 
 #include <vector>
 #include <functional>
+#include <set>
+#include <string>
 #include "session_data.h"
 #include "graphics/icon_manager.h"
 #include "data/filter_manager.h"
@@ -38,12 +40,22 @@ private:
     IconManager& m_iconManager;
     FilterManager& m_filterManager;
     std::function<void(int)> m_deleteSessionCallback;
+    
+    // State tracking for tree node expansion
+    std::set<std::string> m_closedSessions;      // Session IDs that are explicitly closed by user
+    std::set<std::string> m_openApplications;    // Application IDs that are explicitly opened by user
+    std::set<std::string> m_seenSessions;        // Sessions we've seen (to distinguish new from existing)
+    std::set<std::string> m_seenApplications;    // Applications we've seen
+    
+    // Generate stable IDs for state tracking
+    std::string GetSessionId(const Session& session, int sessionIndex) const;
+    std::string GetApplicationId(const Session& session, const ApplicationFocusEvent& app, int appIndex) const;
 
     // Render a single session
     void RenderSession(const Session& session, int sessionIndex);
     
     // Render an application within a session
-    void RenderApplication(const ApplicationFocusEvent& app, int appIndex);
+    void RenderApplication(const Session& session, const ApplicationFocusEvent& app, int appIndex);
     
     // Render tabs for an application
     void RenderTabs(const std::vector<TabInfo>& tabs);
