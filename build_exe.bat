@@ -1,16 +1,25 @@
 @echo off
 pushd "%~dp0"
-echo Installing dependencies...
-pip install -r requirements.txt
-pip install pyinstaller Pillow
+echo Installing dependencies with uv...
+
+REM Check if uv is installed
+where uv >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+    echo uv is not installed. Installing uv...
+    pip install uv
+)
+
+echo.
+echo Syncing dependencies...
+uv sync
 
 echo.
 echo Converting icon...
-python scripts/convert_icon.py
+uv run python scripts/convert_icon.py
 
 echo.
 echo Building executable...
-pyinstaller --noconfirm --onefile --windowed --name "BigBrother" --icon="src/python/bigbrother.ico" src/python/main.py
+uv run pyinstaller --noconfirm --onefile --windowed --name "BigBrother" --icon="src/python/bigbrother.ico" src/python/main.py
 
 echo.
 echo Build complete!
