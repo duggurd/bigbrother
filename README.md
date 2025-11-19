@@ -1,44 +1,67 @@
 # BigBrother - Activity Tracking & Session Monitoring
 
+<p align="center">
+  <img src="media/bb_logo.jpg" alt="BigBrother Logo" width="200"/>
+</p>
+
 Track your computer activity with detailed window focus and title change monitoring. Perfect for consultancy work tracking, productivity analysis, and time billing.
 
-## 🚀 Quick Start
+## 📸 Screenshots
+
+### Dashboard / Historical View
+View past sessions, drill down into applications, and see detailed time breakdowns.
+![Dashboard View](media/bigbrother.png)
+
+### Active Session Recording
+While recording, the active session is highlighted, and the status bar shows your current goal.
+![Active Session](media/bigbrother_active_session.png)
+
+---
+
+## 🚀 Installation (Recommended)
+
+For most users, simply download and install the application:
+
+1. **Download** the latest installer (`BigBrother_Setup.exe`) from the releases page (or `scripts/Output` if building locally).
+2. **Run** the installer.
+3. Launch **BigBrother** from your **Start Menu** or **Desktop**.
+
+---
+
+## 🛠️ Development & Building
+
+If you want to modify the code or build it yourself:
 
 ### Prerequisites
 - **Windows** 10/11
-- **Python 3.7+** (for building from source)
+- **Python 3.12+**
+- **uv** (Dependency Manager) - *will be auto-installed if missing*
 
-### Setup & Run (Source Code)
-
-1. **Clone the repository**
+### 1. Run from Source
+1. Clone the repo:
    ```bash
    git clone https://github.com/yourusername/bigbrother.git
    cd bigbrother
    ```
-
-2. **Install dependencies**
+2. Install dependencies and run:
    ```bash
-   pip install -r requirements.txt
+   uv sync
+   uv run python src/python/main.py
    ```
 
-3. **Run the application**
-   ```bash
-   python src/python/main.py
-   ```
-
-### 📦 Distribution & Building
-
-#### 1. Standalone Executable (No Install)
-To create a single portable `.exe`:
-1. Run `build_exe.bat`.
-2. Find `BigBrother.exe` in the `dist/` folder.
-
-#### 2. Windows Installer (Setup Wizard)
-To create a professional installer that adds BigBrother to the **Start Menu** and **Desktop**:
+### 2. Build Windows Installer
+To create the `BigBrother_Setup.exe` installer yourself:
 
 1. Install [Inno Setup 6](https://jrsoftware.org/isdl.php).
-2. Run `build_installer.bat`.
-3. The installer will be created at `scripts/Output/BigBrother_Setup.exe`.
+2. Run the build script:
+   ```bash
+   build_installer.bat
+   ```
+3. The installer will be created at: `scripts/Output/BigBrother_Setup.exe`
+
+*(Note: `build_installer.bat` automatically handles Python dependencies, builds the standalone EXE, and then compiles the Setup Wizard.)*
+
+---
 
 ## 📁 Project Structure
 
@@ -47,11 +70,12 @@ bigbrother/
 ├── src/
 │   ├── python/          # Main Python application source
 │   │   └── main.py      # Unified Monitor & Viewer logic
-├── dist/                # Built executable
+├── dist/                # Built executable (temporary)
 ├── scripts/
 │   ├── installer.iss    # Inno Setup configuration
 │   └── Output/          # Final Installer location
-├── requirements.txt     # Python dependencies
+├── media/               # Screenshots and assets
+├── pyproject.toml       # Python dependencies & config
 ├── build_exe.bat        # Script to build standalone EXE
 ├── build_installer.bat  # Script to build Setup Wizard
 └── README.md            # Documentation
