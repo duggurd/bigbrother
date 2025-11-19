@@ -6,10 +6,9 @@ Track your computer activity with detailed window focus and title change monitor
 
 ### Prerequisites
 - **Windows** 10/11
-- **CMake** 3.15+ ([Download](https://cmake.org/download/))
-- **Visual Studio** 2019/2022 or **MinGW-w64**
+- **Python 3.7+** (for building from source)
 
-### Setup
+### Setup & Run (Source Code)
 
 1. **Clone the repository**
    ```bash
@@ -17,66 +16,55 @@ Track your computer activity with detailed window focus and title change monitor
    cd bigbrother
    ```
 
-2. **Run setup**
+2. **Install dependencies**
    ```bash
-   scripts\setup_project.bat
-   scripts\setup_imgui.bat
+   pip install -r requirements.txt
    ```
 
-3. **Build**
+3. **Run the application**
    ```bash
-   scripts\build_cmake.bat
+   python src/python/main.py
    ```
 
-4. **Run**
-   ```bash
-   build\bin\Release\bigbrother_monitor.exe     # CLI monitor
-   build\bin\Release\bigbrother_viewer.exe      # GUI viewer
-   ```
+### 📦 Distribution & Building
+
+#### 1. Standalone Executable (No Install)
+To create a single portable `.exe`:
+1. Run `build_exe.bat`.
+2. Find `BigBrother.exe` in the `dist/` folder.
+
+#### 2. Windows Installer (Setup Wizard)
+To create a professional installer that adds BigBrother to the **Start Menu** and **Desktop**:
+
+1. Install [Inno Setup 6](https://jrsoftware.org/isdl.php).
+2. Run `build_installer.bat`.
+3. The installer will be created at `scripts/Output/BigBrother_Setup.exe`.
 
 ## 📁 Project Structure
 
 ```
 bigbrother/
 ├── src/
-│   ├── common/          # Shared code (session logger, data structures, utilities)
-│   ├── monitor/         # CLI monitoring application
-│   └── viewer/          # ImGui GUI viewer application
-├── third_party/         # External dependencies (ImGui, JSON)
-├── docs/                # Documentation
-├── scripts/             # Build and setup scripts
-├── build/               # CMake build output
-└── CMakeLists.txt       # Main CMake configuration
+│   ├── python/          # Main Python application source
+│   │   └── main.py      # Unified Monitor & Viewer logic
+├── dist/                # Built executable
+├── scripts/
+│   ├── installer.iss    # Inno Setup configuration
+│   └── Output/          # Final Installer location
+├── requirements.txt     # Python dependencies
+├── build_exe.bat        # Script to build standalone EXE
+├── build_installer.bat  # Script to build Setup Wizard
+└── README.md            # Documentation
 ```
 
-## 🔧 Components
+## 🔧 Features
 
-### 1. Monitor (CLI)
-Lightweight background service that tracks:
-- Window focus changes
-- Window title changes
-- Process information
-- Timestamps
-
-**Usage:**
-```bash
-bigbrother_monitor.exe
-```
-Press Ctrl+C to stop and save session.
-
-### 2. Viewer (GUI)
-Beautiful ImGui interface for:
-- Viewing session timeline
-- Filtering applications
-- Analyzing time spent
-- Recording new sessions
-
-**Features:**
-- 📊 Timeline view with icons
-- 🎯 Program filters
-- ⏱️ Time aggregation
-- 💾 Settings persistence
-- 🎨 Modern UI
+### Unified Monitor & Viewer
+- **Control Panel**: Start/Stop sessions with goal descriptions.
+- **Live Monitoring**: Tracks window focus and title changes in the background.
+- **Timeline View**: Visual tree of sessions -> applications -> windows.
+- **Time Tracking**: Precise duration and percentage breakdown.
+- **Data Persistence**: Automatically saves to `%APPDATA%\BigBrother\focus_log.json`.
 
 ## 📊 Data Format
 
@@ -88,15 +76,16 @@ Sessions are saved to: `%APPDATA%\BigBrother\focus_log.json`
     {
       "start_timestamp": 1727712000,
       "end_timestamp": 1727715600,
-      "window_focus": [
+      "comment": "Working on Project X",
+      "applications": [
         {
-          "focus_timestamp": 1727712100,
           "process_name": "Code.exe",
           "process_path": "C:\\Program Files\\Microsoft VS Code\\Code.exe",
-          "title_changes": [
+          "total_time_spent_ms": 3600000,
+          "tabs": [
             {
-              "title_timestamp": 1727712100,
-              "window_title": "main.cpp - Visual Studio Code"
+              "window_title": "main.py - Visual Studio Code",
+              "total_time_spent_ms": 3600000
             }
           ]
         }
@@ -106,57 +95,16 @@ Sessions are saved to: `%APPDATA%\BigBrother\focus_log.json`
 }
 ```
 
-## 🛠️ Building from Source
-
-### With CMake (Recommended)
-```bash
-mkdir build
-cd build
-cmake .. -G "Visual Studio 17 2022" -A x64
-cmake --build . --config Release
-```
-
-### Legacy Batch Files
-```bash
-build.bat              # Build monitor (old method)
-build_viewer.bat       # Build viewer (old method)
-```
-
-## 📖 Documentation
-
-- [Future Enhancements](docs/FUTURE_ENHANCEMENTS.md) - Planned features
-- [Refactoring Plan](docs/REFACTORING_PLAN.md) - Code structure improvements
-- [Quick Start Guide](docs/VIEWER_QUICKSTART.md) - Detailed viewer guide
-
 ## 🎯 Use Cases
 
 - **Consultancy Billing** - Track time per client/project
 - **Productivity Analysis** - See where time actually goes
 - **Work Documentation** - Generate activity summaries
 - **Time Tracking** - Detailed work session records
-- **Pattern Recognition** - Identify workflow inefficiencies
-
-## 🔮 Future Plans
-
-- Git integration (branch tracking, commits)
-- Browser URL capture
-- LLM-powered summaries
-- Multi-project tagging
-- Export to CSV/Markdown
-- Cloud sync
-- Analytics dashboard
 
 ## 📝 License
 
 MIT License - See LICENSE file for details
-
-## 🤝 Contributing
-
-Contributions welcome! Please read CONTRIBUTING.md first.
-
-## 📧 Contact
-
-Your Name - your.email@example.com
 
 ---
 
