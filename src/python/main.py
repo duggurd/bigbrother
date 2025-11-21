@@ -54,6 +54,7 @@ class SessionLogger:
         self.session_start = int(time.time())
         self.session_active = True
         self.session_comment = comment
+        self.session_timeline = [] # Ordered list of events
         self.applications = {}
         self.current_process_name = ""
         self.current_process_path = ""
@@ -193,11 +194,20 @@ class SessionLogger:
             }
         app_data["tabs"][self.current_window_title]["total_time_spent_ms"] += duration_ms
 
+        # Append to timeline
+        self.session_timeline.append({
+            "start": self.current_focus_start_time,
+            "end": end_time,
+            "app": self.current_process_name,
+            "title": self.current_window_title
+        })
+
     def build_json(self):
         session_data = {
             "start_timestamp": self.session_start,
             "end_timestamp": int(time.time()) if self.session_active else self.session_start,
             "comment": self.session_comment,
+            "timeline": getattr(self, "session_timeline", []),
             "applications": []
         }
         
@@ -245,6 +255,166 @@ class SessionLogger:
             os.rename(temp_path, self.data_file_path)
         except Exception as e:
             print(f"Error saving: {e}")
+
+
+class TimelineViewer(tk.Toplevel):
+    def __init__(self, parent, session_data):
+        super().__init__(parent)
+        self.title(f"Timeline: {session_data.get('comment', 'Untitled')}")
+        self.geometry("1200x600")
+        
+        self.session_data = session_data
+        self.timeline = session_data.get("timeline", [])
+        
+        self.row_height = 40
+        self.header_width = 200
+        self.padding_top = 50
+        
+        self._setup_ui()
+        self._draw_timeline()
+
+    def _setup_ui(self):
+        # Main container with scrollbars
+        container = ttk.Frame(self)
+        container.pack(fill=tk.BOTH, expand=True)
+        
+        self.canvas = tk.Canvas(container, bg="white")
+        self.h_scroll = ttk.Scrollbar(container, orient=tk.HORIZONTAL, command=self.canvas.xview)
+        self.v_scroll = ttk.Scrollbar(container, orient=tk.VERTICAL, command=self.canvas.yview)
+        
+        self.canvas.configure(xscrollcommand=self.h_scroll.set, yscrollcommand=self.v_scroll.set)
+        
+        self.h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+        self.v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Tooltip label - using a Toplevel for z-index safety or just a label on top
+        self.lbl_tooltip = ttk.Label(self.canvas, text="", background="#ffffe0", relief="solid", padding=2)
+
+    def _draw_timeline(self):
+        if not self.timeline: return
+        
+        # 1. Analyze Data
+        apps = sorted(list(set(e["app"] for e in self.timeline)))
+        app_row_map = {app: i for i, app in enumerate(apps)}
+        
+        start_ts = self.session_data["start_timestamp"]
+        end_ts = self.session_data.get("end_timestamp", int(time.time()))
+        total_duration = max(1, end_ts - start_ts)
+        
+        # 2. Calculate Dimensions
+        # Simple Auto-scale: fit to window width initially (min 800px)
+        # Use winfo_width if available, else default 1000
+        width = self.winfo_width()
+        if width == 1: width = 1000
+            
+        draw_width = max(800, width - self.header_width) 
+        px_per_sec = draw_width / total_duration
+        
+        # If density is too high (too squashed), force minimum width
+        if px_per_sec < 0.5: px_per_sec = 0.5
+            
+        total_width = int(total_duration * px_per_sec) + self.header_width + 50
+        total_height = (len(apps) * self.row_height) + self.padding_top + 50
+        
+        self.canvas.configure(scrollregion=(0, 0, total_width, total_height))
+        
+        # 3. Draw Rows (Headers + Backgrounds)
+        for app, i in app_row_map.items():
+            y = self.padding_top + (i * self.row_height)
+            
+            # Row Background
+            self.canvas.create_rectangle(0, y, total_width, y + self.row_height, fill="#f0f0f0" if i % 2 == 0 else "white", outline="")
+            
+            # Header Text (drawn at x=10, but sticky logic would be better. For MVP, static)
+            self.canvas.create_text(10, y + self.row_height/2, text=app, anchor=tk.W, font=("Segoe UI", 9, "bold"))
+            
+            # Separator
+            self.canvas.create_line(0, y + self.row_height, total_width, y + self.row_height, fill="#ddd")
+
+        # 3.5 Draw Time Axis and Grid
+        target_ticks = 15
+        interval_sec = total_duration / target_ticks
+        
+        nice_intervals = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
+        tick_interval = nice_intervals[-1]
+        for ni in nice_intervals:
+            if interval_sec <= ni:
+                tick_interval = ni
+                break
+        if interval_sec > nice_intervals[-1]:
+             tick_interval = 3600 * max(1, int(interval_sec / 3600))
+
+        current_t = 0
+        while current_t <= total_duration:
+            x = self.header_width + (current_t * px_per_sec)
+            
+            # Grid line (behind events, but over row bg - effectively just a line)
+            self.canvas.create_line(x, self.padding_top, x, total_height, fill="#d0d0d0", dash=(2, 4))
+            
+            # Tick mark
+            self.canvas.create_line(x, self.padding_top - 5, x, self.padding_top, fill="black")
+            
+            # Label
+            ts = start_ts + current_t
+            dt = datetime.fromtimestamp(ts)
+            fmt = "%H:%M:%S" if tick_interval < 60 else "%H:%M"
+            self.canvas.create_text(x, self.padding_top - 15, text=dt.strftime(fmt), anchor="center", font=("Segoe UI", 8))
+            
+            current_t += tick_interval
+
+        # Vertical Separator
+        self.canvas.create_line(self.header_width, 0, self.header_width, total_height, fill="black", width=2)
+        
+        # 4. Draw Events
+        color_cache = {}
+        
+        for event in self.timeline:
+            app = event["app"]
+            row_idx = app_row_map.get(app, 0)
+            
+            t_start = event["start"] - start_ts
+            t_end = event["end"] - start_ts
+            
+            x1 = self.header_width + (t_start * px_per_sec)
+            x2 = self.header_width + (t_end * px_per_sec)
+            if x2 - x1 < 1: x2 = x1 + 1 # Min width visibility
+            
+            y1 = self.padding_top + (row_idx * self.row_height) + 5
+            y2 = y1 + self.row_height - 10
+            
+            # Color generation (simple hash)
+            if app not in color_cache:
+                h = hash(app)
+                r = (h & 0xFF0000) >> 16
+                g = (h & 0x00FF00) >> 8
+                b = h & 0x0000FF
+                # Pastelize
+                r = (r + 255) // 2
+                g = (g + 255) // 2
+                b = (b + 255) // 2
+                color_cache[app] = f"#{r:02x}{g:02x}{b:02x}"
+            
+            rect_id = self.canvas.create_rectangle(x1, y1, x2, y2, fill=color_cache[app], outline="gray")
+            
+            # Bind for tooltip
+            # We use a closure to capture the specific event data
+            def show(e, ev=event):
+                self._show_tooltip(e, ev)
+                
+            self.canvas.tag_bind(rect_id, "<Enter>", show)
+            self.canvas.tag_bind(rect_id, "<Leave>", self._hide_tooltip)
+
+    def _show_tooltip(self, event, data):
+        duration = data['end'] - data['start']
+        txt = f"{data['app']}\n{data['title']}\nDuration: {duration}s"
+        self.lbl_tooltip.config(text=txt)
+        # Position relative to the canvas widget (viewport)
+        self.lbl_tooltip.place(x=event.x + 15, y=event.y + 10)
+        self.lbl_tooltip.lift()
+
+    def _hide_tooltip(self, event):
+        self.lbl_tooltip.place_forget()
 
 
 class MainApp:
@@ -318,6 +488,7 @@ class MainApp:
         
         # Create context menu
         self.context_menu = tk.Menu(self.root, tearoff=0)
+        self.context_menu.add_command(label="View Timeline", command=self._view_session_timeline)
         self.context_menu.add_command(label="Delete Session", command=self._delete_selected_session)
 
     def _on_tree_open(self, event):
@@ -363,6 +534,41 @@ class MainApp:
                     messagebox.showerror("Error", "Failed to delete session.")
         except Exception as e:
             print(f"Error parsing session ID for deletion: {e}")
+
+    def _view_session_timeline(self):
+        selected = self.tree.selection()
+        if not selected: return
+        
+        item_id = selected[0]
+        if not (item_id.startswith("S_") and not "_A_" in item_id):
+            return
+
+        try:
+            ts_str = item_id.split("_")[1]
+            timestamp = int(ts_str)
+            
+            # Retrieve full data
+            data = {}
+            if os.path.exists(self.logger.data_file_path):
+                with open(self.logger.data_file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            
+            session = next((s for s in data.get("sessions", []) if s.get("start_timestamp") == timestamp), None)
+            
+            if not session:
+                messagebox.showerror("Error", "Session data not found.")
+                return
+
+            timeline = session.get("timeline", [])
+            if not timeline:
+                messagebox.showinfo("Info", "No timeline data available for this session (Legacy session).")
+                return
+                
+            TimelineViewer(self.root, session)
+            
+        except Exception as e:
+            print(f"Error opening timeline: {e}")
+            messagebox.showerror("Error", f"Could not open timeline: {e}")
 
     def _on_start_session(self):
         comment = simpledialog.askstring("New Session", "Enter session description/goal:", parent=self.root)
